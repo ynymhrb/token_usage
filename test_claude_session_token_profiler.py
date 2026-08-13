@@ -229,6 +229,33 @@ class PeriodDiagnosisTests(unittest.TestCase):
 
 
 class RewriteMetricTests(unittest.TestCase):
+    def test_period_terminal_output_uses_large_cache_creation_not_rewrite_terms(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_path = Path(temp_dir) / "projects" / "project" / "test-session.jsonl"
+            session_path.parent.mkdir(parents=True)
+            session_path.write_text(json.dumps({
+                "type": "assistant",
+                "timestamp": dt(18, 5).isoformat(),
+                "message": {
+                    "role": "assistant",
+                    "usage": {
+                        "cache_creation_input_tokens": 200_000,
+                        "cache_creation": {"ephemeral_1h_input_tokens": 200_000},
+                    },
+                },
+            }) + "\n", encoding="utf-8")
+            out = io.StringIO()
+
+            with redirect_stdout(out):
+                profiler.analyze_period(
+                    Path(temp_dir), dt(18, 0), dt(19, 0), 2, 10, "en", False, "test",
+                )
+
+        rendered = out.getvalue().lower()
+        self.assertIn("large_cache_creation", rendered)
+        self.assertIn("large cache creations", rendered)
+        self.assertNotIn("rewrite", rendered)
+
     def test_first_large_write_is_initial_population_not_rewrite(self):
         call = profiler.ApiCall(
             actor="main", request_id="1", line=1,

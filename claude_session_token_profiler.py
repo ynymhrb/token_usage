@@ -1817,9 +1817,9 @@ def report_analysis(
         print("未检测到大额缓存创建。" if zh else "No large cache creations detected.")
     else:
         if zh:
-            print(f"{'#':>3}  {'时间':<17} {'执行体':<12} {'上下文':>9} {'缓存读':>9} {'缓存写':>9} {'重写占比':>9}  类型")
+            print(f"{'#':>3}  {'时间':<17} {'执行体':<12} {'上下文':>9} {'缓存读':>9} {'缓存写':>9} {'创建占比':>9}  类型")
         else:
-            print(f"{'#':>3}  {'time':<17} {'actor':<12} {'context':>9} {'cacheR':>9} {'cacheW':>9} {'rewrite%':>9}  type")
+            print(f"{'#':>3}  {'time':<17} {'actor':<12} {'context':>9} {'cacheR':>9} {'cacheW':>9} {'creation%':>9}  type")
         for i, c in enumerate(sorted(rewrites, key=lambda x: x.cache_write, reverse=True)[:top_n], 1):
             pct = 100*c.cache_write/max(1,c.context_input)
             print(f"{i:>3}  {fmt_short_dt(call_dt(c)):<17} {actor_label(c.actor, lang):<12.12} {human_tokens(c.context_input):>9} {human_tokens(c.cache_read):>9} {human_tokens(c.cache_write):>9} {pct:>8.1f}%  LARGE_CACHE_CREATION/{classifications[id(c)]['kind']}")
@@ -1839,10 +1839,10 @@ def report_analysis(
     print("\n[可信的上下文增长热点]" if zh else "\n[CREDIBLE CONTEXT GROWTH HOTSPOTS]")
     print_rule()
     if zh:
-        print("仅保留可由前置 transcript 内容解释的增长；缓存整段重写不会计入这里。")
+        print("仅保留可由前置 transcript 内容解释的增长；大额缓存创建不会计入这里。")
         print(f"{'#':>3}  {'时间':<17} {'执行体':<12} {'增长':>9} {'新上下文':>9}  可能新增内容")
     else:
-        print("Only growth supported by preceding transcript content is shown; full cache rewrites are excluded.")
+        print("Only growth supported by preceding transcript content is shown; large cache creations are excluded.")
         print(f"{'#':>3}  {'time':<17} {'actor':<12} {'delta':>9} {'new ctx':>9}  likely new content")
     for i, (delta, c, _prev, source, _est) in enumerate(sorted(growth_rows,key=lambda x:x[0],reverse=True)[:top_n],1):
         print(f"{i:>3}  {fmt_short_dt(call_dt(c)):<17} {actor_label(c.actor, lang):<12.12} {human_tokens(delta):>9} {human_tokens(c.context_input):>9}  {source}")
@@ -1868,9 +1868,9 @@ def report_analysis(
         print("未发现精确的 5 小时窗口边界。只有 statusLine/结构化 resets_at 才会被标记为精确窗口。" if zh else "No exact 5-hour boundary found. Only statusLine/structured resets_at is treated as exact.")
     else:
         if zh:
-            print(f"{'时间范围':<43} {'调用':>6} {'处理输入':>10} {'缓存读':>9} {'缓存写':>9} {'输出':>8} {'重写':>6} {'账户%':>8}  来源/置信度")
+            print(f"{'时间范围':<43} {'调用':>6} {'处理输入':>10} {'缓存读':>9} {'缓存写':>9} {'输出':>8} {'大额创建':>6} {'账户%':>8}  来源/置信度")
         else:
-            print(f"{'range':<43} {'calls':>6} {'processed':>10} {'cacheR':>9} {'cacheW':>9} {'output':>8} {'rewrite':>7} {'acct%':>8}  source/confidence")
+            print(f"{'range':<43} {'calls':>6} {'processed':>10} {'cacheR':>9} {'cacheW':>9} {'output':>8} {'largeCache':>10} {'acct%':>8}  source/confidence")
         for w in windows:
             rng=f"{fmt_dt(w['start'])} -> {fmt_dt(w['end'])}"
             pct=w.get('used_percentage'); pct_s='-' if pct is None else f"{pct}%"
@@ -2119,7 +2119,7 @@ def analyze_period(
     print("\n[会话贡献排名]" if zh else "\n[SESSION CONTRIBUTION RANKING]")
     print_rule()
     if zh:
-        print(f"{'#':>3} {'会话ID':<14} {'项目':<20} {'活动范围':<29} {'调用':>5} {'处理输入':>10} {'缓存读':>9} {'缓存写':>9} {'输出':>8} {'重写':>5} {'峰值ctx':>9} {'思考~':>9}")
+        print(f"{'#':>3} {'会话ID':<14} {'项目':<20} {'活动范围':<29} {'调用':>5} {'处理输入':>10} {'缓存读':>9} {'缓存写':>9} {'输出':>8} {'大额创建':>5} {'峰值ctx':>9} {'思考~':>9}")
     for i,s in enumerate(sorted(session_rows,key=lambda x:x['processed'],reverse=True)[:top_n],1):
         sid=s['session_id'][:12]
         project=Path(s['cwd']).name or str(s['cwd'])
@@ -2127,7 +2127,7 @@ def analyze_period(
             active=f"{fmt_short_dt(s['first'])}->{fmt_short_dt(s['last'])}"
             print(f"{i:>3} {sid:<14} {project[:20]:<20} {active:<29} {s['calls']:>5} {human_tokens(s['processed']):>10} {human_tokens(s['cache_read']):>9} {human_tokens(s['cache_write']):>9} {human_tokens(s['output']):>8} {s['rewrites']:>5} {human_tokens(s['peak_context']):>9} {human_tokens(s['thinking']):>9}")
         else:
-            print(f"{i:>3} {sid:<14} {project[:24]:<24} calls={s['calls']:>4} processed={human_tokens(s['processed']):>9} cacheR={human_tokens(s['cache_read']):>9} cacheW={human_tokens(s['cache_write']):>9} out={human_tokens(s['output']):>8} rewrites={s['rewrites']:>3}")
+            print(f"{i:>3} {sid:<14} {project[:24]:<24} calls={s['calls']:>4} processed={human_tokens(s['processed']):>9} cacheR={human_tokens(s['cache_read']):>9} cacheW={human_tokens(s['cache_write']):>9} out={human_tokens(s['output']):>8} largeCacheCreations={s['rewrites']:>3}")
 
     print("\n[会话逐轮消耗]" if zh else "\n[SESSION TURN USAGE]")
     print_rule()
@@ -2148,14 +2148,14 @@ def analyze_period(
                     f"     调用 {turn['calls']}｜处理输入 {human_tokens(turn['processed'])}｜"
                     f"缓存读 {human_tokens(turn['cache_read'])}｜缓存写 {human_tokens(turn['cache_write'])}｜"
                     f"输出 {human_tokens(turn['output'])}｜峰值ctx {human_tokens(turn['peak_context'])}｜"
-                    f"重写 {turn['rewrites']}｜思考~{human_tokens(turn['thinking'])}"
+                    f"大额缓存创建 {turn['rewrites']}｜思考~{human_tokens(turn['thinking'])}"
                 )
             else:
                 print(
                     f"     calls {turn['calls']} | processed {human_tokens(turn['processed'])} | "
                     f"cacheR {human_tokens(turn['cache_read'])} | cacheW {human_tokens(turn['cache_write'])} | "
                     f"out {human_tokens(turn['output'])} | peak {human_tokens(turn['peak_context'])} | "
-                    f"rewrites {turn['rewrites']} | thinking~{human_tokens(turn['thinking'])}"
+                    f"large cache creations {turn['rewrites']} | thinking~{human_tokens(turn['thinking'])}"
                 )
 
     print("\n[周期内最大的大额缓存创建]" if zh else "\n[LARGEST LARGE CACHE CREATIONS IN PERIOD]")
@@ -2183,7 +2183,7 @@ def analyze_period(
     print("\n[逐调用时间线]" if zh else "\n[PER-CALL TIMELINE]")
     print_rule()
     if zh:
-        print(f"{'时间':<17} {'会话':<10} {'模型':<20} {'上下文':>9} {'缓存读':>9} {'缓存写':>9} {'输出':>8} {'重写率':>8} {'TTL':>6}")
+        print(f"{'时间':<17} {'会话':<10} {'模型':<20} {'上下文':>9} {'缓存读':>9} {'缓存写':>9} {'输出':>8} {'创建率':>8} {'TTL':>6}")
     for c in sorted(all_period_calls, key=lambda x: call_dt(x) or start):
         details = cache_rewrite_details(c)
         sid = c.actor.split(":", 1)[-1].split("/", 1)[0][:8]
@@ -2191,7 +2191,7 @@ def analyze_period(
         if zh:
             print(f"{fmt_short_dt(call_dt(c)):<17} {sid:<10} {c.model[:20]:<20} {human_tokens(c.context_input):>9} {human_tokens(c.cache_read):>9} {human_tokens(c.cache_write):>9} {human_tokens(c.output_tokens):>8} {details['rewrite_ratio']*100:>7.1f}% {details['ttl']:>6}{marker}")
         else:
-            print(f"{fmt_short_dt(call_dt(c))} {sid} {c.model} ctx={human_tokens(c.context_input)} cacheR={human_tokens(c.cache_read)} cacheW={human_tokens(c.cache_write)} out={human_tokens(c.output_tokens)} rewrite={details['rewrite_ratio']*100:.1f}% ttl={details['ttl']}{marker}")
+            print(f"{fmt_short_dt(call_dt(c))} {sid} {c.model} ctx={human_tokens(c.context_input)} cacheR={human_tokens(c.cache_read)} cacheW={human_tokens(c.cache_write)} out={human_tokens(c.output_tokens)} creation={details['rewrite_ratio']*100:.1f}% ttl={details['ttl']}{marker}")
     if zh:
         print("* = LARGE_CACHE_CREATION；processed input 是本地归因指标，不等同于订阅额度的精确扣减。")
     else:
@@ -2356,9 +2356,9 @@ def main() -> int:
     print("\n[解读]" if zh else "\n[INTERPRETATION]")
     print_rule()
     if zh:
-        print("- 单会话模式定位具体哪次调用、thinking、tool result 与缓存重写最重。")
+        print("- 单会话模式定位具体哪次调用、thinking、tool result 与大额缓存创建最重。")
         print("- 周期模式会扫描本机 projects 下所有会话，并只统计落在时间范围内的 API 调用。")
-        print("- FULL_REWRITE 表示大段 Prompt Cache 未命中并重新写入；它不是等量的上下文新增。")
+        print("- LARGE_CACHE_CREATION 表示观测到的大额 Prompt Cache 写入；它不是等量的上下文新增。")
         print("- 5h 边界优先级：statusLine resets_at > JSONL 明确 resets 时间 > limit+下一次成功调用区间。")
     else:
         print("- Session mode diagnoses individual requests; period mode aggregates all local sessions in a time range.")

@@ -121,6 +121,42 @@ class ContextDistributionTests(unittest.TestCase):
         self.assertNotIn(">100.0k context", rendered)
 
 
+class ReportContractTests(unittest.TestCase):
+    def sample_legacy_report(self):
+        return {
+            "profiler_version": "2.6.0",
+            "mode": "period",
+            "period": {"start": "2026-08-13 18:00:00 +0800", "end": "2026-08-13 23:00:00 +0800"},
+            "account_five_hour_window": {"start": "2026-08-13 18:00:00 +0800"},
+            "totals": {"processed": 123, "calls": 2},
+            "diagnosis": {"severity": "HIGH", "context_distribution": {"max": 99}},
+            "dynamic_estimate": {"assistant:thinking": 42},
+            "sessions": [{"session_id": "session-1", "processed": 100, "turns": [{"title": "raw user text"}]}],
+            "call_timeline": [{"request_id": "full-request-id", "large_cache_creation": True}],
+            "limit_events": [{"kind": "five_hour_limit"}],
+            "parse_errors": 1,
+        }
+
+    def test_contract_separates_measurement_classes_and_keeps_legacy_metadata(self):
+        report = profiler.build_report_contract(self.sample_legacy_report())
+
+        self.assertEqual(report["schema_version"], "1.0")
+        for key in ("facts", "derived_metrics", "estimates", "heuristic_flags", "data_gaps", "sessions", "calls", "deprecated"):
+            self.assertIn(key, report)
+        self.assertEqual(report["facts"]["totals"]["processed"], 123)
+        self.assertEqual(report["estimates"]["dynamic_transcript_tokens"]["assistant:thinking"], 42)
+        self.assertIn("severity", report["deprecated"])
+        self.assertEqual(report["calls"][0]["request_id"], "full-request-id")
+
+    def test_llm_package_is_compact_and_states_quota_and_device_gaps(self):
+        package = profiler.build_llm_package(profiler.build_report_contract(self.sample_legacy_report()))
+
+        self.assertFalse(package["interpretation_constraints"]["processed_input_equals_quota"])
+        self.assertIn("other devices", " ".join(package["data_gaps"]).lower())
+        self.assertNotIn("full-request-id", json.dumps(package))
+        self.assertNotIn("raw user text", json.dumps(package))
+
+
 class PeriodDiagnosisTests(unittest.TestCase):
     def test_summary_identifies_responsible_session_and_rewrite_proximity(self):
         start, end = dt(18, 0), dt(23, 0)

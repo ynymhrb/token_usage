@@ -1925,6 +1925,194 @@ def report_analysis(
     return report
 
 
+def build_report_contract(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
+    """Build schema 1.0 without mixing exact, derived, and estimated values.
+
+    ``legacy_report`` remains an internal compatibility input while downstream
+    consumers migrate to this versioned structure.  Its complete top-level
+    shape is retained in ``deprecated`` for one compatibility version.
+    """
+    legacy = dict(legacy_report)
+    diagnosis = dict(legacy.get("diagnosis") or {})
+    dynamic_estimate = dict(legacy.get("dynamic_estimate") or {})
+    period = legacy.get("period")
+    session_range = legacy.get("session_time_range")
+    account_window = legacy.get("account_five_hour_window")
+
+    facts: Dict[str, Any] = {
+        "profiler_version": legacy.get("profiler_version", __version__),
+        "mode": legacy.get("mode", "session"),
+        "language": legacy.get("language"),
+        "period": period,
+        "session_time_range": session_range,
+        "account_five_hour_window": account_window,
+        "totals": legacy.get("totals", {}),
+        "limit_incidents": legacy.get("limit_events", []),
+    }
+    if "context" in legacy:
+        facts["context"] = legacy["context"]
+
+    derived_metrics = {
+        key: value for key, value in diagnosis.items()
+        if key not in {"thinking_estimate", "severity", "full_rewrite_metrics_deprecated"}
+    }
+    if "models_processed" in legacy:
+        derived_metrics["models_processed"] = legacy["models_processed"]
+    if "period_diagnosis" in legacy and isinstance(legacy["period_diagnosis"], dict):
+        derived_metrics["period_diagnosis"] = {
+            key: value for key, value in legacy["period_diagnosis"].items()
+            if key != "severity"
+        }
+
+    heuristic_flags: List[Dict[str, Any]] = []
+    for call in legacy.get("call_timeline", []):
+        if not isinstance(call, dict):
+            continue
+        classification = call.get("cache_creation_classification")
+        if isinstance(classification, dict) and call.get("large_cache_creation"):
+            heuristic_flags.append({
+                "type": "LARGE_CACHE_CREATION",
+                "timestamp": call.get("timestamp"),
+                "session_id": call.get("session_id"),
+                "model": call.get("model"),
+                "classification": classification,
+            })
+
+    data_gaps = [
+        "Local JSONL processed input is not equivalent to subscription quota deduction.",
+        "Claude.ai and other devices are not observable in local Claude Code JSONL.",
+        "Hidden system prompts, tool schemas, and server-side compaction details are not observable.",
+    ]
+    parse_errors = legacy.get("parse_errors", 0)
+    if parse_errors:
+        data_gaps.append(f"{parse_errors} JSONL parse error(s) were skipped while reading local transcripts.")
+
+    deprecated: Dict[str, Any] = {
+        "compatibility": "Legacy top-level report fields are retained for one schema version; migrate to schema_version 1.0 sections.",
+        "legacy_top_level": legacy,
+    }
+    severity = diagnosis.get("severity")
+    if severity is None and isinstance(legacy.get("period_diagnosis"), dict):
+        severity = legacy["period_diagnosis"].get("severity")
+    if severity is not None:
+        deprecated["severity"] = severity
+
+    return {
+        "schema_version": "1.0",
+        "facts": facts,
+        "derived_metrics": derived_metrics,
+        "estimates": {
+            "dynamic_transcript_tokens": dynamic_estimate,
+            "measurement": "character-based heuristic; not billable token accounting",
+        },
+        "heuristic_flags": heuristic_flags,
+        "data_gaps": data_gaps,
+        "sessions": legacy.get("sessions", legacy.get("transcripts", [])),
+        "calls": legacy.get("call_timeline", []),
+        "deprecated": deprecated,
+    }
+
+
+def build_llm_package(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a compact, transcript-free package for optional LLM analysis."""
+    facts = report.get("facts", {})
+    metrics = report.get("derived_metrics", {})
+    sessions = report.get("sessions", [])
+    calls = report.get("calls", [])
+    total_processed = int((facts.get("totals") or {}).get("processed") or
+                          (facts.get("totals") or {}).get("total_context_input_processed") or 0)
+    compact_sessions: List[Dict[str, Any]] = []
+    for session in sessions if isinstance(sessions, list) else []:
+        if not isinstance(session, dict):
+            continue
+        processed = int(session.get("processed") or 0)
+        turns = []
+        for turn in session.get("turns", []) if isinstance(session.get("turns"), list) else []:
+            if isinstance(turn, dict):
+                compact_turn = {key: turn.get(key) for key in (
+                    "round", "calls", "processed", "cache_read", "cache_write", "output",
+                    "peak_context", "rewrites", "thinking",
+                )}
+                turn_processed = int(turn.get("processed") or 0)
+                compact_turn["processed_share_pct"] = (
+                    100.0 * turn_processed / total_processed if total_processed else 0.0
+                )
+                turns.append(compact_turn)
+        compact_sessions.append({
+            "session_id": session.get("session_id"),
+            "calls": session.get("calls"),
+            "processed": processed,
+            "processed_share_pct": 100.0 * processed / total_processed if total_processed else 0.0,
+            "cache_read": session.get("cache_read"),
+            "cache_write": session.get("cache_write"),
+            "output": session.get("output"),
+            "peak_context": session.get("peak_context"),
+            "turns": turns,
+        })
+    compact_calls = []
+    for call in calls if isinstance(calls, list) else []:
+        if isinstance(call, dict) and call.get("large_cache_creation"):
+            compact_calls.append({key: call.get(key) for key in (
+                "timestamp", "session_id", "model", "context_input_tokens",
+                "cache_creation_input_tokens", "cache_ttl", "cache_creation_classification",
+            )})
+    model_processed = metrics.get("models_processed", {})
+    model_shares = {
+        model: {
+            "processed": int(processed or 0),
+            "processed_share_pct": 100.0 * int(processed or 0) / total_processed if total_processed else 0.0,
+        }
+        for model, processed in model_processed.items()
+    } if isinstance(model_processed, dict) else {}
+    return {
+        "schema_version": "1.0",
+        "account_window": facts.get("account_five_hour_window") or facts.get("period") or facts.get("session_time_range"),
+        "context_distribution": metrics.get("context_distribution", {}),
+        "model_processed_shares": model_shares,
+        "sessions": compact_sessions,
+        "cache_flags": report.get("heuristic_flags", []),
+        "large_cache_creation_evidence": compact_calls,
+        "limit_incidents": facts.get("limit_incidents", []),
+        "estimates": report.get("estimates", {}),
+        "data_gaps": report.get("data_gaps", []),
+        "interpretation_constraints": {
+            "processed_input_equals_quota": False,
+            "statement": "Processed input is local JSONL attribution, not subscription quota deduction; Claude.ai and other devices are gaps.",
+        },
+    }
+
+
+def llm_package_markdown(package: Dict[str, Any]) -> str:
+    """Render the compact package with the same semantic content as JSON."""
+    lines = ["# Usage analysis LLM package", "", "## Interpretation constraints", ""]
+    constraints = package.get("interpretation_constraints", {})
+    lines.append(f"- Processed input equals quota: {constraints.get('processed_input_equals_quota')}")
+    lines.append(f"- {constraints.get('statement', '')}")
+    for heading, key in (
+        ("Account window", "account_window"), ("Context distribution", "context_distribution"),
+        ("Model processed shares", "model_processed_shares"), ("Sessions and turns", "sessions"),
+        ("Cache flags", "cache_flags"), ("Limit incidents", "limit_incidents"),
+        ("Estimates", "estimates"), ("Data gaps", "data_gaps"),
+    ):
+        lines.extend(["", f"## {heading}", ""])
+        value = package.get(key)
+        if key == "data_gaps" and isinstance(value, list):
+            lines.extend(f"- {item}" for item in value)
+        else:
+            lines.append("```json")
+            lines.append(json.dumps(value, ensure_ascii=False, indent=2))
+            lines.append("```")
+    return "\n".join(lines) + "\n"
+
+
+def write_llm_package(path: Path, package: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix.lower() == ".md":
+        path.write_text(llm_package_markdown(package), encoding="utf-8")
+    else:
+        path.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def print_known_windows(claude_home: Path, lang: str, search_depth: int = 2, include_subagents: bool = True) -> int:
     zh = lang == "zh"
     windows = combined_known_five_hour_windows(claude_home, search_depth, include_subagents)
@@ -2246,6 +2434,7 @@ def analyze_period(
 def main() -> int:
     # Observation thresholds describe the distribution; they are not risk limits.
     ap = argparse.ArgumentParser(description="Claude Code Token Profiler：单会话 + 时间周期聚合分析")
+    ap.epilog = "JSON migration: --json-out writes schema 1.0; legacy top-level fields remain under deprecated for one compatibility version."
     ap.add_argument("--context-threshold", type=int, action="append", metavar="TOKENS", help="repeatable context observation threshold; defaults to 100000, 200000, 500000")
     ap.add_argument("session_id", nargs="?", help="单会话模式：Claude Code session UUID")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -2264,6 +2453,7 @@ def main() -> int:
     mode.add_argument("--current-five-hour", action="store_true", help="周期聚合：优先 statusLine；无 statusLine 时从最新 JSONL reset 提示推断当前 5h 周期")
     mode.add_argument("--five-hour-at", metavar="DATETIME", help="周期聚合：优先 statusLine；否则从历史 JSONL reset 锚点定位包含该时间的 5h 窗口")
     mode.add_argument("--list-five-hour-windows", action="store_true", help="列出 statusLine + 历史 JSONL 可识别的 5h 窗口")
+    ap.add_argument("--llm-package", type=Path, help="write compact transcript-free LLM package; .md selects Markdown, otherwise UTF-8 JSON")
     args = ap.parse_args()
     if args.context_threshold and any(value < 0 for value in args.context_threshold):
         ap.error("--context-threshold must be non-negative")
@@ -2310,10 +2500,15 @@ def main() -> int:
             start,end=exact['start'],exact['end']; source=exact.get("source","inferred-five-hour-at")
         if end <= start: ap.error("period END must be after START")
         report=analyze_period(claude_home,start,end,max(0,args.search_depth),max(1,args.top),args.lang,not args.no_subagents,source,exact,context_thresholds)
+        contract = build_report_contract(report)
         if args.json_out:
             out=args.json_out.expanduser().resolve(); out.parent.mkdir(parents=True,exist_ok=True)
-            out.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+            out.write_text(json.dumps(contract,ensure_ascii=False,indent=2),encoding='utf-8')
             print(f"\n{'JSON 报告已写入' if zh else 'JSON report written'}: {out}")
+        if args.llm_package:
+            out=args.llm_package.expanduser().resolve()
+            write_llm_package(out, build_llm_package(contract))
+            print(f"\nLLM package written: {out}")
         return 0
 
     if not args.session_id:
@@ -2348,9 +2543,10 @@ def main() -> int:
         for sp in find_subagent_files(main_path,args.session_id): analyses.append(analyze_transcript(sp,sp.stem.replace("agent-","agent:")))
     report=report_analysis(analyses,context_info,max(1,args.top),args.lang,claude_home,args.session_id,main_path,main_rows,context_thresholds)
     report.update({"session_id":args.session_id,"main_transcript":str(main_path),"project_cwd":str(cwd),"live_usage_raw":live_usage_raw,"main_parse_errors_initial":main_errors})
+    contract = build_report_contract(report)
     if args.json_out:
         out=args.json_out.expanduser().resolve(); out.parent.mkdir(parents=True,exist_ok=True)
-        out.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+        out.write_text(json.dumps(contract,ensure_ascii=False,indent=2),encoding='utf-8')
         print(f"\n{'JSON 报告已写入' if zh else 'JSON report written'}: {out}")
 
     print("\n[解读]" if zh else "\n[INTERPRETATION]")
@@ -2364,6 +2560,10 @@ def main() -> int:
         print("- Session mode diagnoses individual requests; period mode aggregates all local sessions in a time range.")
         print("- LARGE_CACHE_CREATION is an observed large cache write, not equivalent context growth.")
         print("- 5h boundary priority: statusLine resets_at > explicit transcript reset text > limit/next-success bracket.")
+    if args.llm_package:
+        out=args.llm_package.expanduser().resolve()
+        write_llm_package(out, build_llm_package(contract))
+        print(f"\nLLM package written: {out}")
     return 0
 
 

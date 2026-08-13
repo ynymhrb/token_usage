@@ -1,0 +1,4 @@
+interface:
+  display_name: "usageAnalyze"
+  short_description: "Analyze Claude token usage safely"
+  default_prompt: "Use $usage-analyze to inspect my current five-hour Claude usage."

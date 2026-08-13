@@ -15,7 +15,7 @@ No third-party Python packages are required.
 
 from __future__ import annotations
 
-__version__ = "2.6.0"
+__version__ = "3.0.0"
 
 import argparse
 import collections

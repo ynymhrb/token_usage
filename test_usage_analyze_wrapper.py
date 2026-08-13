@@ -101,7 +101,7 @@ class UsageAnalyzeWrapperTests(unittest.TestCase):
             result = self.run_wrapper(["--version"], Path(temp_dir), os.environ.copy())
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("2.6.0", result.stdout)
+        self.assertIn("3.0.0", result.stdout)
 
 
 if __name__ == "__main__":

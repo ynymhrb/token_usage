@@ -34,6 +34,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 NUMBER_RE = re.compile(r"(?P<n>\d+(?:\.\d+)?)\s*(?P<unit>[kKmM]?)")
+DEFAULT_CONTEXT_THRESHOLDS = (100_000, 200_000, 500_000)
 
 
 def strip_ansi(s: str) -> str:
@@ -1434,31 +1435,59 @@ def capture_statusline(claude_home: Path, lang: str) -> int:
     return 0
 
 
-def diagnosis_metrics(all_calls: List[ApiCall], est_total: collections.Counter[str], limit_events: List[Dict[str, Any]]) -> Dict[str, Any]:
+def percentile(values: Iterable[int], percentile: float) -> int:
+    """Return a linearly interpolated percentile from integer measurements."""
+    sorted_values = sorted(values)
+    if not sorted_values:
+        return 0
+    if not 0 <= percentile <= 100:
+        raise ValueError("percentile must be between 0 and 100")
+    position = (len(sorted_values) - 1) * percentile / 100
+    lower = int(position)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    return int(sorted_values[lower] + (sorted_values[upper] - sorted_values[lower]) * (position - lower))
+
+
+def context_distribution(calls: Iterable[ApiCall], thresholds: Iterable[int]) -> Dict[str, Any]:
+    """Return context measurements and strict-greater observation buckets."""
+    call_list = list(calls)
+    contexts = [c.context_input for c in call_list]
+    processed = sum(contexts)
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for threshold in sorted(set(int(value) for value in thresholds)):
+        if threshold < 0:
+            raise ValueError("context threshold must be non-negative")
+        matching = [c for c in call_list if c.context_input > threshold]
+        matching_processed = sum(c.context_input for c in matching)
+        buckets[f"gt_{threshold}"] = {
+            "threshold": threshold,
+            "calls": len(matching),
+            "call_pct": 100.0 * len(matching) / len(call_list) if call_list else 0.0,
+            "processed": matching_processed,
+            "processed_pct": 100.0 * matching_processed / processed if processed else 0.0,
+        }
+    return {
+        "percentiles": {f"p{p}": percentile(contexts, p) for p in (50, 75, 90, 95)},
+        "max": max(contexts, default=0),
+        "buckets": buckets,
+    }
+
+
+def diagnosis_metrics(
+    all_calls: List[ApiCall], est_total: collections.Counter[str], limit_events: List[Dict[str, Any]],
+    context_threshold: Optional[int] = None,
+) -> Dict[str, Any]:
     rewrites = [c for c in all_calls if is_full_rewrite(c)]
     rewrite_tokens = sum(c.cache_write for c in rewrites)
     cache_write_total = sum(c.cache_write for c in all_calls)
     processed = sum(c.context_input for c in all_calls)
-    long_calls = [c for c in all_calls if c.context_input > 150_000]
-    long_processed = sum(c.context_input for c in long_calls)
-    peak = max((c.context_input for c in all_calls), default=0)
     thinking = int(est_total.get("assistant:thinking", 0))
-    severity = "LOW"
-    if peak >= 500_000 or processed >= 10_000_000 or rewrite_tokens >= 2_000_000:
-        severity = "CRITICAL"
-    elif peak >= 250_000 or processed >= 5_000_000 or rewrite_tokens >= 1_000_000:
-        severity = "HIGH"
-    elif peak > 150_000 or processed >= 1_000_000 or rewrites:
-        severity = "MEDIUM"
+    thresholds = (context_threshold,) if context_threshold is not None else DEFAULT_CONTEXT_THRESHOLDS
     return {
-        "severity": severity,
-        "peak_context": peak,
+        "context_distribution": context_distribution(all_calls, thresholds),
+        "peak_context": max((c.context_input for c in all_calls), default=0),
         "processed": processed,
         "api_calls": len(all_calls),
-        "long_context_calls": len(long_calls),
-        "long_context_call_pct": (100.0 * len(long_calls) / len(all_calls)) if all_calls else 0.0,
-        "long_context_processed": long_processed,
-        "long_context_processed_pct": (100.0 * long_processed / processed) if processed else 0.0,
         "full_rewrite_count": len(rewrites),
         "full_rewrite_tokens": rewrite_tokens,
         "full_rewrite_cache_write_pct": (100.0 * rewrite_tokens / cache_write_total) if cache_write_total else 0.0,
@@ -1534,8 +1563,11 @@ def print_period_diagnosis(summary: Dict[str, Any], lang: str) -> None:
     print("\n最大风险：")
     print("① 长上下文")
     print(f"   峰值 {human_tokens(summary.get('peak_context', 0))}")
-    print(f"   {summary.get('long_context_call_pct', 0):.0f}%的请求 >150k")
-    print(f"   却贡献{summary.get('long_context_processed_pct', 0):.1f}%的输入处理量")
+    distribution = summary.get("context_distribution", {})
+    percentiles = distribution.get("percentiles", {})
+    print("   P50/P75/P90/P95 " + "/".join(
+        human_tokens(percentiles.get(key, 0)) for key in ("p50", "p75", "p90", "p95")
+    ))
     print("\n② Prompt Cache整段重写")
     print(f"   {summary.get('full_rewrite_count', 0)}次，共{human_tokens(summary.get('full_rewrite_tokens', 0))}")
     print(f"   占cache write {summary.get('full_rewrite_cache_write_pct', 0):.1f}%")
@@ -1554,7 +1586,7 @@ def print_period_diagnosis(summary: Dict[str, Any], lang: str) -> None:
     print("普通任务减少Opus高effort使用。")
 
 
-def print_diagnosis(metrics: Dict[str, Any], lang: str) -> None:
+def _legacy_diagnosis_reference(metrics: Dict[str, Any], lang: str) -> None:
     zh = lang == "zh"
     print("\n[诊断摘要]" if zh else "\n[DIAGNOSTIC SUMMARY]")
     print_rule()
@@ -1582,6 +1614,27 @@ def print_diagnosis(metrics: Dict[str, Any], lang: str) -> None:
         print(f"Rewrite share of cacheW   : {metrics['full_rewrite_cache_write_pct']:.1f}%")
         print(f"Thinking estimate         : ~{human_tokens(metrics['thinking_estimate'])}")
         print(f"5h limit events           : {metrics['limit_events']}")
+
+
+def print_diagnosis(metrics: Dict[str, Any], lang: str) -> None:
+    """Print measurements without assigning a risk severity."""
+    distribution = metrics["context_distribution"]
+    percentiles = distribution["percentiles"]
+    print("\n[上下文分布]" if lang == "zh" else "\n[CONTEXT DISTRIBUTION]")
+    print_rule()
+    print("P50/P75/P90/P95           : " + "/".join(
+        human_tokens(percentiles[key]) for key in ("p50", "p75", "p90", "p95")
+    ))
+    print(f"Maximum request context   : {human_tokens(distribution['max'])}")
+    for bucket in distribution["buckets"].values():
+        print(
+            f">{human_tokens(bucket['threshold'])} context          : "
+            f"{bucket['calls']}/{metrics['api_calls']} ({bucket['call_pct']:.1f}% calls), "
+            f"{human_tokens(bucket['processed'])} ({bucket['processed_pct']:.1f}% processed)"
+        )
+    print(f"Large cache creations     : {metrics['full_rewrite_count']} / {human_tokens(metrics['full_rewrite_tokens'])} ({metrics['full_rewrite_cache_write_pct']:.1f}% cache write)")
+    print(f"Thinking estimate         : ~{human_tokens(metrics['thinking_estimate'])}")
+    print(f"5h limit events           : {metrics['limit_events']}")
 
 
 def infer_limit_reset_brackets(calls: List[ApiCall], events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1619,6 +1672,7 @@ def infer_limit_reset_brackets(calls: List[ApiCall], events: List[Dict[str, Any]
 def report_analysis(
     analyses: List[TranscriptAnalysis], context_info: Optional[Dict[str, Any]], top_n: int,
     lang: str, claude_home: Path, session_id: str, main_path: Path, main_rows: List[Dict[str, Any]],
+    context_thresholds: Iterable[int] = DEFAULT_CONTEXT_THRESHOLDS,
 ) -> Dict[str, Any]:
     zh = lang == "zh"
     all_calls = [c for a in analyses for c in a.calls]
@@ -1637,6 +1691,7 @@ def report_analysis(
         est_total.update(a.estimated_categories_total)
     limit_events = transcript_limit_events(main_rows)
     diag = diagnosis_metrics(all_calls, est_total, limit_events)
+    diag["context_distribution"] = context_distribution(all_calls, context_thresholds)
     print_diagnosis(diag, lang)
 
     dts = [call_dt(c) for c in all_calls if call_dt(c)]
@@ -1815,6 +1870,7 @@ def analyze_period(
     claude_home: Path, start: datetime, end: datetime, search_depth: int,
     top_n: int, lang: str, include_subagents: bool, source: str,
     exact_window: Optional[Dict[str, Any]] = None,
+    context_thresholds: Iterable[int] = DEFAULT_CONTEXT_THRESHOLDS,
 ) -> Dict[str, Any]:
     zh = lang == "zh"
     session_rows: List[Dict[str, Any]] = []
@@ -1889,6 +1945,7 @@ def analyze_period(
 
     limit_incidents = collapse_limit_events(limit_events_all)
     diag = diagnosis_metrics(all_period_calls, aggregate_dynamic, limit_incidents)
+    diag["context_distribution"] = context_distribution(all_period_calls, context_thresholds)
     detected_limit_at = min(
         (e["time"] for e in limit_incidents
          if e.get("kind") == "five_hour_limit" and isinstance(e.get("time"), datetime)),
@@ -2102,7 +2159,9 @@ def analyze_period(
 
 
 def main() -> int:
+    # Observation thresholds describe the distribution; they are not risk limits.
     ap = argparse.ArgumentParser(description="Claude Code Token Profiler：单会话 + 时间周期聚合分析")
+    ap.add_argument("--context-threshold", type=int, action="append", metavar="TOKENS", help="repeatable context observation threshold; defaults to 100000, 200000, 500000")
     ap.add_argument("session_id", nargs="?", help="单会话模式：Claude Code session UUID")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     ap.add_argument("--lang", choices=("zh","en"), default="zh", help="输出语言，默认 zh")
@@ -2121,6 +2180,9 @@ def main() -> int:
     mode.add_argument("--five-hour-at", metavar="DATETIME", help="周期聚合：优先 statusLine；否则从历史 JSONL reset 锚点定位包含该时间的 5h 窗口")
     mode.add_argument("--list-five-hour-windows", action="store_true", help="列出 statusLine + 历史 JSONL 可识别的 5h 窗口")
     args = ap.parse_args()
+    if args.context_threshold and any(value < 0 for value in args.context_threshold):
+        ap.error("--context-threshold must be non-negative")
+    context_thresholds = args.context_threshold or DEFAULT_CONTEXT_THRESHOLDS
     zh=args.lang=="zh"
     claude_home=args.claude_home.expanduser().resolve()
 
@@ -2162,7 +2224,7 @@ def main() -> int:
                 ap.error("无法从 statusLine 或历史 JSONL 找到包含该时间点的 5 小时窗口；可使用 --period 手工指定。")
             start,end=exact['start'],exact['end']; source=exact.get("source","inferred-five-hour-at")
         if end <= start: ap.error("period END must be after START")
-        report=analyze_period(claude_home,start,end,max(0,args.search_depth),max(1,args.top),args.lang,not args.no_subagents,source,exact)
+        report=analyze_period(claude_home,start,end,max(0,args.search_depth),max(1,args.top),args.lang,not args.no_subagents,source,exact,context_thresholds)
         if args.json_out:
             out=args.json_out.expanduser().resolve(); out.parent.mkdir(parents=True,exist_ok=True)
             out.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
@@ -2199,7 +2261,7 @@ def main() -> int:
     analyses=[analyze_transcript(main_path,"main")]
     if not args.no_subagents:
         for sp in find_subagent_files(main_path,args.session_id): analyses.append(analyze_transcript(sp,sp.stem.replace("agent-","agent:")))
-    report=report_analysis(analyses,context_info,max(1,args.top),args.lang,claude_home,args.session_id,main_path,main_rows)
+    report=report_analysis(analyses,context_info,max(1,args.top),args.lang,claude_home,args.session_id,main_path,main_rows,context_thresholds)
     report.update({"session_id":args.session_id,"main_transcript":str(main_path),"project_cwd":str(cwd),"live_usage_raw":live_usage_raw,"main_parse_errors_initial":main_errors})
     if args.json_out:
         out=args.json_out.expanduser().resolve(); out.parent.mkdir(parents=True,exist_ok=True)

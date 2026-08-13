@@ -38,6 +38,45 @@ class LimitEventTests(unittest.TestCase):
         self.assertEqual(incidents[0]["attempts"], 2)
 
 
+class ContextDistributionTests(unittest.TestCase):
+    def test_percentiles_and_fixed_buckets_are_hand_checkable(self):
+        calls = [
+            profiler.ApiCall("main", str(i), i, cache_read=n)
+            for i, n in enumerate([10_000, 100_000, 200_000, 500_000])
+        ]
+
+        result = profiler.context_distribution(calls, [100_000, 200_000, 500_000])
+
+        self.assertEqual(
+            result["percentiles"],
+            {"p50": 150_000, "p75": 275_000, "p90": 410_000, "p95": 455_000},
+        )
+        self.assertEqual(result["buckets"]["gt_100000"]["calls"], 2)
+        self.assertEqual(result["buckets"]["gt_200000"]["calls"], 1)
+        self.assertEqual(result["buckets"]["gt_500000"]["calls"], 0)
+
+    def test_measurements_have_no_severity(self):
+        result = profiler.diagnosis_metrics([], profiler.collections.Counter(), [])
+
+        self.assertNotIn("severity", result)
+
+    def test_bucket_measurements_include_threshold_and_processed_shares(self):
+        calls = [
+            profiler.ApiCall("main", "a", 1, cache_read=100_000),
+            profiler.ApiCall("main", "b", 2, cache_read=300_000),
+        ]
+
+        bucket = profiler.context_distribution(calls, [100_000])["buckets"]["gt_100000"]
+
+        self.assertEqual(bucket, {
+            "threshold": 100_000,
+            "calls": 1,
+            "call_pct": 50.0,
+            "processed": 300_000,
+            "processed_pct": 75.0,
+        })
+
+
 class PeriodDiagnosisTests(unittest.TestCase):
     def test_summary_identifies_responsible_session_and_rewrite_proximity(self):
         start, end = dt(18, 0), dt(23, 0)

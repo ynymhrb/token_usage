@@ -767,11 +767,11 @@ def user_turn_title(row: Dict[str, Any], max_chars: int = 100) -> str:
     return truncate_title(raw, max_chars)
 
 
-def aggregate_conversation_turns(
+def _conversation_turn_buckets(
     main_rows: List[Dict[str, Any]], calls: Iterable[ApiCall],
     start: datetime, end: datetime,
-) -> List[Dict[str, Any]]:
-    """Assign main and subagent API calls to the latest main-session user input."""
+) -> "collections.OrderedDict[Tuple[Optional[datetime], str], List[ApiCall]]":
+    """Use main-session user inputs to bucket both main and subagent calls."""
     anchors: List[Tuple[datetime, str]] = []
     for row in main_rows:
         title = user_turn_title(row)
@@ -789,6 +789,28 @@ def aggregate_conversation_turns(
         key = anchor if anchor else (None, "会话恢复/后台继续")
         buckets.setdefault(key, []).append(call)
 
+    return buckets
+
+
+def conversation_turn_numbers(
+    main_rows: List[Dict[str, Any]], calls: Iterable[ApiCall],
+    start: datetime, end: datetime,
+) -> Dict[int, int]:
+    """Return the production turn number for each call, including subagents."""
+    buckets = _conversation_turn_buckets(main_rows, calls, start, end)
+    return {
+        id(call): index
+        for index, turn_calls in enumerate(buckets.values(), 1)
+        for call in turn_calls
+    }
+
+
+def aggregate_conversation_turns(
+    main_rows: List[Dict[str, Any]], calls: Iterable[ApiCall],
+    start: datetime, end: datetime,
+) -> List[Dict[str, Any]]:
+    """Assign main and subagent API calls to the latest main-session user input."""
+    buckets = _conversation_turn_buckets(main_rows, calls, start, end)
     turns: List[Dict[str, Any]] = []
     for index, ((anchor_at, title), turn_calls) in enumerate(buckets.items(), 1):
         times = [call_dt(c) for c in turn_calls if call_dt(c)]
@@ -1773,6 +1795,11 @@ def report_analysis(
     dts = [call_dt(c) for c in all_calls if call_dt(c)]
     start_dt = min(dts) if dts else None
     end_dt = max(dts) if dts else None
+    turn_numbers = conversation_turn_numbers(
+        main_rows, all_calls,
+        datetime.min.replace(tzinfo=timezone.utc),
+        end_dt + timedelta(microseconds=1) if end_dt else datetime.max.replace(tzinfo=timezone.utc),
+    ) if all_calls else {}
     print("\n[会话时间范围]" if zh else "\n[SESSION TIME RANGE]")
     print_rule()
     print(("开始" if zh else "Start") + f" : {fmt_dt(start_dt)}")
@@ -1906,8 +1933,9 @@ def report_analysis(
         "transcripts": [],
     }
     for a in analyses:
+        actor_session = session_id if a.actor == "main" else a.actor
         report["transcripts"].append({
-            "actor": a.actor, "path": str(a.path), "parse_errors": a.parse_errors,
+            "actor": a.actor, "session_id": actor_session, "path": str(a.path), "parse_errors": a.parse_errors,
             "estimated_dynamic_categories": dict(a.estimated_categories_total),
             "calls": [{
                 "request_id": c.request_id, "line": c.line, "timestamp": c.timestamp, "model": c.model,
@@ -1915,6 +1943,7 @@ def report_analysis(
                 "cache_creation_input_tokens": c.cache_write, "output_tokens_jsonl_snapshot": c.output_tokens,
                 "cache_creation_5m_tokens": c.cache_write_5m, "cache_creation_1h_tokens": c.cache_write_1h,
                 "context_input_tokens": c.context_input,
+                "turn": turn_numbers.get(id(c), 1),
                 "large_cache_creation": is_large_cache_creation(c),
                 "cache_creation_classification": classifications[id(c)],
                 "full_cache_rewrite": is_large_cache_creation(c),
@@ -2001,12 +2030,18 @@ def _contract_sessions_and_calls(
             continue
         transcript_calls = [call for call in transcript.get("calls", []) if isinstance(call, dict)]
         actor = str(transcript.get("actor") or "")
-        transcript_session_id = main_session_id if actor == "main" and main_session_id else actor
+        transcript_session_id = transcript.get("session_id") or (
+            main_session_id if actor == "main" and main_session_id else actor
+        )
         normalized_calls = [
             _normalized_contract_call(call, transcript_session_id, actor) for call in transcript_calls
         ]
         calls.extend(normalized_calls)
-        raw_calls.extend(transcript_calls)
+        raw_calls.extend([
+            {**call, "session_id": call.get("session_id", transcript_session_id),
+             "actor": call.get("actor", actor)}
+            for call in transcript_calls
+        ])
         processed = sum(int(call.get("context_input_tokens") or 0) for call in normalized_calls)
         sessions.append({
             "session_id": transcript_session_id,
@@ -2098,7 +2133,11 @@ def build_report_contract(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
                 "type": "LARGE_CACHE_CREATION",
                 "timestamp": call.get("timestamp"),
                 "session_id": call.get("session_id", legacy.get("session_id")),
+                "actor": call.get("actor"),
                 "model": call.get("model"),
+                "turn": call.get("turn"),
+                "context_input_tokens": call.get("context_input_tokens"),
+                "cache_creation_input_tokens": call.get("cache_creation_input_tokens"),
                 "classification": classification,
             })
 

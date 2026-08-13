@@ -200,6 +200,39 @@ class ReportContractTests(unittest.TestCase):
         self.assertEqual(package["model_processed_shares"]["model-b"]["processed_share_pct"], 100 / 3)
         self.assertEqual(package["sessions"][0]["turns"][0]["processed_share_pct"], 200 / 3)
 
+    def test_single_session_producer_uses_main_turns_for_main_and_subagent_calls(self):
+        main_rows = [
+            {"type": "user", "timestamp": dt(18, 0).isoformat(),
+             "message": {"role": "user", "content": "first visible turn"}},
+            {"type": "user", "timestamp": dt(18, 10).isoformat(),
+             "message": {"role": "user", "content": "second visible turn"}},
+        ]
+        main_call = profiler.ApiCall("main", "main-request", 1, dt(18, 1).isoformat(), "model-main", cache_read=100)
+        subagent_call = profiler.ApiCall("agent:sub", "sub-request", 2, dt(18, 11).isoformat(), "model-sub", cache_write=200_000)
+        analyses = [
+            profiler.TranscriptAnalysis("main", Path("main.jsonl"), [main_call], [], profiler.collections.Counter()),
+            profiler.TranscriptAnalysis("agent:sub", Path("agent.jsonl"), [subagent_call], [], profiler.collections.Counter()),
+        ]
+        with redirect_stdout(io.StringIO()):
+            legacy = profiler.report_analysis(
+                analyses, None, 5, "en", Path("."), "main-session", Path("main.jsonl"), main_rows,
+            )
+
+        contract = profiler.build_report_contract({**legacy, "session_id": "main-session"})
+        package = profiler.build_llm_package(contract)
+        calls = {call["model"]: call for call in contract["calls"]}
+        cache_flag = contract["heuristic_flags"][0]
+
+        self.assertEqual(calls["model-main"]["turn"], 1)
+        self.assertEqual(calls["model-sub"]["turn"], 2)
+        self.assertEqual(calls["model-sub"]["session_id"], "agent:sub")
+        self.assertEqual(cache_flag["session_id"], "agent:sub")
+        evidence = package["large_cache_creation_evidence"][0]
+        self.assertEqual(evidence["context_input_tokens"], 200_000)
+        self.assertEqual(evidence["cache_creation_input_tokens"], 200_000)
+        self.assertEqual(evidence["turn"], 2)
+        self.assertNotIn("request_id", json.dumps(evidence))
+
     def test_markdown_carries_schema_and_large_cache_evidence_semantics(self):
         package = profiler.build_llm_package(profiler.build_report_contract(self.sample_legacy_report()))
         markdown = profiler.llm_package_markdown(package)

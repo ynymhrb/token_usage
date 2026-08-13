@@ -1,4 +1,4 @@
-# Claude Code Session Token Profiler v2.5.0
+# Claude Code Session Token Profiler v2.6.0
 #!/usr/bin/env python3
 """
 Claude Code session token profiler.
@@ -15,7 +15,7 @@ No third-party Python packages are required.
 
 from __future__ import annotations
 
-__version__ = "2.5.0"
+__version__ = "2.6.0"
 
 import argparse
 import collections
@@ -579,13 +579,134 @@ def cache_rewrite_details(c: ApiCall) -> Dict[str, Any]:
         ttl = "5m"
     else:
         ttl = "unknown" if c.cache_write else "none"
+    full_rewrite = is_full_rewrite(c)
+    if not full_rewrite:
+        likely_cause = "incremental-cache-write" if c.cache_write else "none"
+    elif ttl == "1h":
+        likely_cause = "1h-cache-miss-or-expiry"
+    elif ttl == "5m":
+        likely_cause = "5m-cache-miss-or-expiry"
+    else:
+        likely_cause = "cold-start-or-cache-invalidation"
     return {
-        "is_full_rewrite": is_full_rewrite(c),
+        "is_full_rewrite": full_rewrite,
         "rewrite_ratio": (c.cache_write / ctx) if ctx else 0.0,
         "ttl": ttl,
+        "likely_cause": likely_cause,
         "cache_write_5m": c.cache_write_5m,
         "cache_write_1h": c.cache_write_1h,
     }
+
+
+def call_timeline_record(c: ApiCall) -> Dict[str, Any]:
+    details = cache_rewrite_details(c)
+    actor_session = c.actor.split(":", 1)[-1].split("/", 1)[0]
+    return {
+        "timestamp": fmt_dt(call_dt(c)),
+        "session_id": actor_session,
+        "actor": c.actor,
+        "model": c.model,
+        "request_id": c.request_id,
+        "input_tokens": c.input_tokens,
+        "cache_read_input_tokens": c.cache_read,
+        "cache_creation_input_tokens": c.cache_write,
+        "output_tokens": c.output_tokens,
+        "context_input_tokens": c.context_input,
+        "full_cache_rewrite": details["is_full_rewrite"],
+        "rewrite_ratio": details["rewrite_ratio"],
+        "cache_ttl": details["ttl"],
+        "likely_rewrite_cause": details["likely_cause"],
+        "measurement": "exact-jsonl-usage",
+    }
+
+
+CO_CREATOR_LINE_RE = re.compile(
+    r"^\[[^\]\r\n]+\]\s+\[[^\]\r\n]*\bco-creator\]\s*(?P<text>.+)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def truncate_title(text: str, max_chars: int = 100) -> str:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max(0, max_chars - 1)].rstrip() + "…"
+
+
+def user_turn_title(row: Dict[str, Any], max_chars: int = 100) -> str:
+    """Extract a human-facing title from a real user-input transcript row."""
+    if row.get("type") != "user" or row.get("sourceToolAssistantUUID"):
+        return ""
+    msg = row.get("message")
+    if not isinstance(msg, dict) or msg.get("role") != "user":
+        return ""
+    content = msg.get("content")
+    texts: List[str] = []
+    if isinstance(content, str):
+        texts.append(content)
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                value = block.get("text")
+                if isinstance(value, str):
+                    texts.append(value)
+    raw = "\n".join(texts).strip()
+    if not raw:
+        return ""
+    # Collaboration wrappers carry the actual human message near the end of a
+    # synthesized dispatch prompt. Prefer that text over the wrapper boilerplate.
+    embedded = list(CO_CREATOR_LINE_RE.finditer(raw))
+    if embedded:
+        raw = embedded[-1].group("text")
+    return truncate_title(raw, max_chars)
+
+
+def aggregate_conversation_turns(
+    main_rows: List[Dict[str, Any]], calls: Iterable[ApiCall],
+    start: datetime, end: datetime,
+) -> List[Dict[str, Any]]:
+    """Assign main and subagent API calls to the latest main-session user input."""
+    anchors: List[Tuple[datetime, str]] = []
+    for row in main_rows:
+        title = user_turn_title(row)
+        timestamp = parse_dt(row.get("timestamp"))
+        if title and timestamp and start <= timestamp < end:
+            anchors.append((timestamp, title))
+    anchors.sort(key=lambda item: item[0])
+
+    buckets: "collections.OrderedDict[Tuple[Optional[datetime], str], List[ApiCall]]" = collections.OrderedDict()
+    for call in sorted(calls, key=lambda c: call_dt(c) or start):
+        timestamp = call_dt(call)
+        if timestamp is None or not (start <= timestamp < end):
+            continue
+        anchor = next((item for item in reversed(anchors) if item[0] <= timestamp), None)
+        key = anchor if anchor else (None, "会话恢复/后台继续")
+        buckets.setdefault(key, []).append(call)
+
+    turns: List[Dict[str, Any]] = []
+    for index, ((anchor_at, title), turn_calls) in enumerate(buckets.items(), 1):
+        times = [call_dt(c) for c in turn_calls if call_dt(c)]
+        rewrites = [c for c in turn_calls if is_full_rewrite(c)]
+        dynamic: collections.Counter[str] = collections.Counter()
+        for call in turn_calls:
+            dynamic.update(call.preceding_est)
+        turns.append({
+            "round": index,
+            "title": title,
+            "user_input_at": anchor_at,
+            "activity_start": min(times) if times else None,
+            "activity_end": max(times) if times else None,
+            "calls": len(turn_calls),
+            "processed": sum(c.context_input for c in turn_calls),
+            "cache_read": sum(c.cache_read for c in turn_calls),
+            "cache_write": sum(c.cache_write for c in turn_calls),
+            "output": sum(c.output_tokens for c in turn_calls),
+            "peak_context": max((c.context_input for c in turn_calls), default=0),
+            "rewrites": len(rewrites),
+            "rewrite_tokens": sum(c.cache_write for c in rewrites),
+            "thinking": int(dynamic.get("assistant:thinking", 0)),
+        })
+    return turns
 
 
 def dynamic_label(name: str, lang: str) -> str:
@@ -820,40 +941,6 @@ def collapse_limit_events(events: Iterable[Dict[str, Any]]) -> List[Dict[str, An
                 last = incident.get("last_time")
                 incident["last_time"] = max(last, t) if isinstance(last, datetime) else t
     return list(grouped.values())
-
-
-def capture_statusline(claude_home: Path, lang: str) -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as e:
-        print(f"statusline capture error: {e}", file=sys.stderr)
-        return 2
-    matches: List[Dict[str, Any]] = []
-    find_structured_five_hour(payload, matches)
-    now = datetime.now().astimezone()
-    record: Dict[str, Any] = {
-        "observed_at": now.isoformat(),
-        "session_id": payload.get("session_id") if isinstance(payload, dict) else None,
-        "transcript_path": payload.get("transcript_path") if isinstance(payload, dict) else None,
-        "model": payload.get("model") if isinstance(payload, dict) else None,
-    }
-    if matches:
-        best = matches[-1]
-        record["five_hour_resets_at"] = best.get("resets_at")
-        record["five_hour_used_percentage"] = best.get("used_percentage")
-    log_path = claude_home / "token-profiler-rate-limits.jsonl"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    reset = parse_dt(record.get("five_hour_resets_at"))
-    used = record.get("five_hour_used_percentage")
-    if used is not None or reset is not None:
-        label = "5小时" if lang == "zh" else "5h"
-        pieces = [label]
-        if used is not None: pieces.append(f"{used}%")
-        if reset is not None: pieces.append(("重置 " if lang == "zh" else "reset ") + reset.astimezone().strftime("%H:%M"))
-        print(" · ".join(pieces))
-    return 0
 
 
 def load_statusline_windows(claude_home: Path, session_id: str, main_path: Path) -> List[Dict[str, Any]]:
@@ -1277,7 +1364,7 @@ def status_snapshot_signature(record: Dict[str, Any]) -> Tuple[Any, ...]:
     return tuple(record.get(k) for k in keys)
 
 
-def improved_capture_statusline(claude_home: Path, lang: str) -> int:
+def capture_statusline(claude_home: Path, lang: str) -> int:
     """Capture lightweight subscription/context snapshots from Claude Code statusLine stdin."""
     try:
         payload = json.load(sys.stdin)
@@ -1345,10 +1432,6 @@ def improved_capture_statusline(claude_home: Path, lang: str) -> int:
     if pieces:
         print(" · ".join(pieces))
     return 0
-
-
-# Replace the earlier implementation while preserving compatibility.
-capture_statusline = improved_capture_statusline
 
 
 def diagnosis_metrics(all_calls: List[ApiCall], est_total: collections.Counter[str], limit_events: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1766,6 +1849,7 @@ def analyze_period(
             continue
         cwd = detect_cwd(main_rows, main_path.parent)
         dyn = period_dynamic_estimate(period_calls)
+        turns = aggregate_conversation_turns(main_rows, period_calls, start, end)
         aggregate_dynamic.update(dyn)
         all_period_calls.extend(period_calls)
         for c in period_calls:
@@ -1785,6 +1869,7 @@ def analyze_period(
             "rewrite_tokens": sum(c.cache_write for c in rewrites),
             "peak_context": max((c.context_input for c in period_calls), default=0),
             "thinking": int(dyn.get("assistant:thinking",0)),
+            "turns": turns,
             "first": min(dts) if dts else None,
             "last": max(dts) if dts else None,
             "parse_errors": len(main_errors) + sum(len(a.parse_errors) for a in analyses[1:]),
@@ -1905,6 +1990,35 @@ def analyze_period(
         else:
             print(f"{i:>3} {sid:<14} {project[:24]:<24} calls={s['calls']:>4} processed={human_tokens(s['processed']):>9} cacheR={human_tokens(s['cache_read']):>9} cacheW={human_tokens(s['cache_write']):>9} out={human_tokens(s['output']):>8} rewrites={s['rewrites']:>3}")
 
+    print("\n[会话逐轮消耗]" if zh else "\n[SESSION TURN USAGE]")
+    print_rule()
+    ranked_sessions = sorted(session_rows, key=lambda x:x['processed'], reverse=True)[:top_n]
+    for session in ranked_sessions:
+        sid = session["session_id"][:12]
+        print(f"\n{('会话' if zh else 'Session')} {sid}")
+        turns = session.get("turns", [])
+        if not turns:
+            print("  无可归属调用" if zh else "  No attributable calls")
+            continue
+        for turn in turns:
+            when = turn.get("user_input_at") or turn.get("activity_start")
+            stamp = when.astimezone().strftime("%H:%M:%S") if isinstance(when, datetime) else "-"
+            print(f"  #{turn['round']} {stamp}  {turn['title']}")
+            if zh:
+                print(
+                    f"     调用 {turn['calls']}｜处理输入 {human_tokens(turn['processed'])}｜"
+                    f"缓存读 {human_tokens(turn['cache_read'])}｜缓存写 {human_tokens(turn['cache_write'])}｜"
+                    f"输出 {human_tokens(turn['output'])}｜峰值ctx {human_tokens(turn['peak_context'])}｜"
+                    f"重写 {turn['rewrites']}｜思考~{human_tokens(turn['thinking'])}"
+                )
+            else:
+                print(
+                    f"     calls {turn['calls']} | processed {human_tokens(turn['processed'])} | "
+                    f"cacheR {human_tokens(turn['cache_read'])} | cacheW {human_tokens(turn['cache_write'])} | "
+                    f"out {human_tokens(turn['output'])} | peak {human_tokens(turn['peak_context'])} | "
+                    f"rewrites {turn['rewrites']} | thinking~{human_tokens(turn['thinking'])}"
+                )
+
     print("\n[周期内最大的缓存重写]" if zh else "\n[LARGEST CACHE REWRITES IN PERIOD]")
     print_rule()
     rw = sorted([c for c in all_period_calls if is_full_rewrite(c)],key=lambda c:c.cache_write,reverse=True)[:top_n]
@@ -1968,8 +2082,19 @@ def analyze_period(
         },
         "totals":totals,"diagnosis":diag,"dynamic_estimate":dict(aggregate_dynamic),
         "period_diagnosis": {k:(fmt_dt(v) if isinstance(v,datetime) else v) for k,v in period_summary.items()},
+        "call_timeline": [call_timeline_record(c) for c in sorted(all_period_calls, key=lambda x: call_dt(x) or start)],
         "models_processed":dict(models_processed),
-        "sessions":[{**s,"path":str(s['path']),"cwd":str(s['cwd']),"first":fmt_dt(s['first']),"last":fmt_dt(s['last'])} for s in session_rows],
+        "sessions":[{
+            **s,
+            "path":str(s['path']), "cwd":str(s['cwd']),
+            "first":fmt_dt(s['first']), "last":fmt_dt(s['last']),
+            "turns":[{
+                **turn,
+                "user_input_at":fmt_dt(turn.get("user_input_at")),
+                "activity_start":fmt_dt(turn.get("activity_start")),
+                "activity_end":fmt_dt(turn.get("activity_end")),
+            } for turn in s.get("turns", [])],
+        } for s in session_rows],
         "limit_events":[{**e,"time":fmt_dt(e.get('time')),"last_time":fmt_dt(e.get('last_time')),"reset":fmt_dt(e.get('reset')) if e.get('reset') else None} for e in limit_incidents],
         "parse_errors":parse_errors_total,
     }

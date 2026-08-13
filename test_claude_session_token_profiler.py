@@ -164,5 +164,70 @@ class RewriteMetricTests(unittest.TestCase):
         self.assertEqual(record["measurement"], "exact-jsonl-usage")
 
 
+class ConversationTurnTests(unittest.TestCase):
+    def test_user_title_uses_text_only_normalizes_space_and_limits_to_100_chars(self):
+        row = {
+            "type": "user",
+            "timestamp": dt(18, 0).isoformat(),
+            "message": {"role": "user", "content": [
+                {"type": "text", "text": "  请分析\n\n这段 " + "很长" * 60},
+                {"type": "tool_result", "content": "不要作为标题"},
+            ]},
+        }
+
+        title = profiler.user_turn_title(row)
+
+        self.assertEqual(len(title), 100)
+        self.assertTrue(title.startswith("请分析 这段 很长"))
+        self.assertTrue(title.endswith("…"))
+        self.assertNotIn("不要作为标题", title)
+
+    def test_user_title_extracts_embedded_co_creator_input_from_dispatch_context(self):
+        row = {
+            "type": "user",
+            "timestamp": dt(18, 0).isoformat(),
+            "message": {"role": "user", "content": (
+                "## Dispatch Mission Context\nmission: 选题\n历史内容\n"
+                "[0001786631788171-000074] [14:36 UTC co-creator] "
+                "@架构喵 你们再深入讨论5轮，看能否发现亮点\n[/对话历史]"
+            )},
+        }
+
+        self.assertEqual(
+            profiler.user_turn_title(row),
+            "@架构喵 你们再深入讨论5轮，看能否发现亮点",
+        )
+
+    def test_turns_group_main_and_subagent_calls_under_latest_main_user_input(self):
+        rows = [
+            {"type": "user", "timestamp": dt(18, 0).isoformat(), "message": {"role": "user", "content": "第一问"}},
+            {"type": "user", "timestamp": dt(18, 30).isoformat(), "message": {"role": "user", "content": "第二问"}},
+            {"type": "user", "timestamp": dt(18, 31).isoformat(), "sourceToolAssistantUUID": "x", "message": {"role": "user", "content": [{"type": "tool_result", "content": "工具结果"}]}},
+        ]
+        calls = [
+            profiler.ApiCall(actor="session:main", request_id="m1", line=1, timestamp=dt(18, 5).isoformat(), cache_read=100),
+            profiler.ApiCall(actor="session:main/agent:a", request_id="a1", line=2, timestamp=dt(18, 10).isoformat(), cache_read=200),
+            profiler.ApiCall(actor="session:main", request_id="m2", line=3, timestamp=dt(18, 35).isoformat(), cache_write=300, output_tokens=20),
+        ]
+
+        turns = profiler.aggregate_conversation_turns(rows, calls, dt(18, 0), dt(19, 0))
+
+        self.assertEqual([t["title"] for t in turns], ["第一问", "第二问"])
+        self.assertEqual(turns[0]["calls"], 2)
+        self.assertEqual(turns[0]["processed"], 300)
+        self.assertEqual(turns[1]["calls"], 1)
+        self.assertEqual(turns[1]["cache_write"], 300)
+
+    def test_call_before_first_visible_user_input_uses_resume_bucket(self):
+        calls = [
+            profiler.ApiCall(actor="session:main", request_id="m1", line=1, timestamp=dt(18, 5).isoformat(), cache_read=100),
+        ]
+
+        turns = profiler.aggregate_conversation_turns([], calls, dt(18, 0), dt(19, 0))
+
+        self.assertEqual(turns[0]["title"], "会话恢复/后台继续")
+        self.assertEqual(turns[0]["calls"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

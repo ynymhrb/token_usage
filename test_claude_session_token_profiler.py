@@ -1,7 +1,12 @@
 import io
+import json
+import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import patch
 
 import claude_session_token_profiler as profiler
 
@@ -86,6 +91,34 @@ class ContextDistributionTests(unittest.TestCase):
             profiler.print_diagnosis(metrics, "en")
 
         self.assertIn(">123.5k context", out.getvalue())
+
+    def test_cli_repeatable_thresholds_propagate_to_session_report(self):
+        session_id = "test-session"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_path = Path(temp_dir) / "projects" / "project" / f"{session_id}.jsonl"
+            session_path.parent.mkdir(parents=True)
+            session_path.write_text(json.dumps({
+                "type": "assistant",
+                "timestamp": dt(18, 0).isoformat(),
+                "message": {
+                    "role": "assistant",
+                    "usage": {"cache_read_input_tokens": 200_000},
+                },
+            }) + "\n", encoding="utf-8")
+            out = io.StringIO()
+            argv = [
+                "profiler", "--lang", "en", "--claude-home", temp_dir,
+                "--no-subagents", "--context-threshold", "123456",
+                "--context-threshold", "234567", session_id,
+            ]
+
+            with patch.object(sys, "argv", argv), redirect_stdout(out):
+                self.assertEqual(profiler.main(), 0)
+
+        rendered = out.getvalue()
+        self.assertIn(">123.5k context", rendered)
+        self.assertIn(">234.6k context", rendered)
+        self.assertNotIn(">100.0k context", rendered)
 
 
 class PeriodDiagnosisTests(unittest.TestCase):

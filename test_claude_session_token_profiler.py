@@ -156,6 +156,48 @@ class ReportContractTests(unittest.TestCase):
         self.assertNotIn("full-request-id", json.dumps(package))
         self.assertNotIn("raw user text", json.dumps(package))
 
+    def test_single_session_shape_is_normalized_and_package_strips_transcript_details(self):
+        legacy = {
+            "profiler_version": "2.6.0", "session_id": "main-session-id",
+            "totals": {"total_context_input_processed": 300},
+            "diagnosis": {"thinking_estimate": 70, "context_distribution": {"max": 200}},
+            "transcripts": [{
+                "actor": "main", "path": "secret-transcript-path", "parse_errors": [],
+                "estimated_dynamic_categories": {"assistant:thinking": 70},
+                "calls": [{
+                    "request_id": "single-session-full-request-id", "timestamp": "when", "model": "model-a",
+                    "context_input_tokens": 200, "cache_read_input_tokens": 100,
+                    "cache_creation_input_tokens": 100, "output_tokens_jsonl_snapshot": 5,
+                    "large_cache_creation": True,
+                    "cache_creation_classification": {"kind": "initial-cache-population"},
+                    "preceding_transcript_estimate": {"user:text": 999},
+                }, {"request_id": "another-full-request-id", "context_input_tokens": 100, "model": "model-b"}],
+            }],
+        }
+
+        contract = profiler.build_report_contract(legacy)
+        package = profiler.build_llm_package(contract)
+
+        self.assertEqual(contract["sessions"][0]["session_id"], "main-session-id")
+        self.assertEqual(contract["sessions"][0]["processed"], 300)
+        self.assertEqual(contract["estimates"]["dynamic_transcript_tokens"]["assistant:thinking"], 70)
+        self.assertNotIn("thinking_estimate", contract["derived_metrics"])
+        serialized = json.dumps(package)
+        self.assertNotIn("request_id", serialized)
+        self.assertNotIn("single-session-full-request-id", serialized)
+        self.assertNotIn("secret-transcript-path", serialized)
+        self.assertEqual(package["sessions"][0]["processed_share_pct"], 100.0)
+        self.assertEqual(package["sessions"][0]["session_id"], "main-session-id")
+
+    def test_markdown_carries_schema_and_large_cache_evidence_semantics(self):
+        package = profiler.build_llm_package(profiler.build_report_contract(self.sample_legacy_report()))
+        markdown = profiler.llm_package_markdown(package)
+
+        self.assertIn("schema_version", markdown)
+        self.assertIn("Large cache creation evidence", markdown)
+        self.assertIn(json.dumps(package["large_cache_creation_evidence"], ensure_ascii=False, indent=2), markdown)
+        self.assertIn(json.dumps(package["estimates"], ensure_ascii=False, indent=2), markdown)
+
 
 class PeriodDiagnosisTests(unittest.TestCase):
     def test_summary_identifies_responsible_session_and_rewrite_proximity(self):

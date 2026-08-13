@@ -1925,6 +1925,75 @@ def report_analysis(
     return report
 
 
+def _without_estimate_fields(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove fields whose values are explicitly character-based estimates."""
+    return {
+        key: value for key, value in record.items()
+        if key not in {"thinking", "thinking_estimate", "responsible_thinking"}
+    }
+
+
+def _contract_sessions_and_calls(legacy: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Normalize period rows and single-session transcript rows to one shape."""
+    if isinstance(legacy.get("sessions"), list):
+        sessions = []
+        for session in legacy["sessions"]:
+            if not isinstance(session, dict):
+                continue
+            normalized = _without_estimate_fields(session)
+            normalized["turns"] = [
+                _without_estimate_fields(turn) for turn in session.get("turns", [])
+                if isinstance(turn, dict)
+            ]
+            sessions.append(normalized)
+        return sessions, list(legacy.get("call_timeline") or [])
+
+    sessions = []
+    calls: List[Dict[str, Any]] = []
+    main_session_id = legacy.get("session_id")
+    for transcript in legacy.get("transcripts", []):
+        if not isinstance(transcript, dict):
+            continue
+        transcript_calls = [call for call in transcript.get("calls", []) if isinstance(call, dict)]
+        calls.extend(transcript_calls)
+        processed = sum(int(call.get("context_input_tokens") or 0) for call in transcript_calls)
+        actor = str(transcript.get("actor") or "")
+        sessions.append({
+            "session_id": main_session_id if actor == "main" and main_session_id else actor,
+            "actor": actor,
+            "calls": len(transcript_calls),
+            "processed": processed,
+            "cache_read": sum(int(call.get("cache_read_input_tokens") or 0) for call in transcript_calls),
+            "cache_write": sum(int(call.get("cache_creation_input_tokens") or 0) for call in transcript_calls),
+            "output": sum(int(call.get("output_tokens_jsonl_snapshot") or 0) for call in transcript_calls),
+            "peak_context": max((int(call.get("context_input_tokens") or 0) for call in transcript_calls), default=0),
+            "parse_errors": len(transcript.get("parse_errors") or []),
+            "turns": [],
+        })
+    return sessions, calls
+
+
+def _contract_estimates(legacy: Dict[str, Any], diagnosis: Dict[str, Any]) -> Dict[str, Any]:
+    """Collect estimates from either legacy report shape without relabeling facts."""
+    dynamic = collections.Counter(legacy.get("dynamic_estimate") or {})
+    for transcript in legacy.get("transcripts", []):
+        if isinstance(transcript, dict):
+            dynamic.update(transcript.get("estimated_dynamic_categories") or {})
+    estimates: Dict[str, Any] = {
+        "dynamic_transcript_tokens": dict(dynamic),
+        "measurement": "character-based heuristic; not billable token accounting",
+    }
+    thinking = diagnosis.get("thinking_estimate")
+    if thinking is not None:
+        estimates["thinking_tokens"] = thinking
+    period_diagnosis = legacy.get("period_diagnosis")
+    if isinstance(period_diagnosis, dict):
+        for key in ("thinking_estimate", "responsible_thinking"):
+            if key in period_diagnosis:
+                estimates[f"period_{key}"] = period_diagnosis[key]
+    return estimates
+
+
 def build_report_contract(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
     """Build schema 1.0 without mixing exact, derived, and estimated values.
 
@@ -1934,7 +2003,7 @@ def build_report_contract(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
     """
     legacy = dict(legacy_report)
     diagnosis = dict(legacy.get("diagnosis") or {})
-    dynamic_estimate = dict(legacy.get("dynamic_estimate") or {})
+    sessions, calls = _contract_sessions_and_calls(legacy)
     period = legacy.get("period")
     session_range = legacy.get("session_time_range")
     account_window = legacy.get("account_five_hour_window")
@@ -1960,12 +2029,12 @@ def build_report_contract(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
         derived_metrics["models_processed"] = legacy["models_processed"]
     if "period_diagnosis" in legacy and isinstance(legacy["period_diagnosis"], dict):
         derived_metrics["period_diagnosis"] = {
-            key: value for key, value in legacy["period_diagnosis"].items()
+            key: value for key, value in _without_estimate_fields(legacy["period_diagnosis"]).items()
             if key != "severity"
         }
 
     heuristic_flags: List[Dict[str, Any]] = []
-    for call in legacy.get("call_timeline", []):
+    for call in calls:
         if not isinstance(call, dict):
             continue
         classification = call.get("cache_creation_classification")
@@ -2001,14 +2070,11 @@ def build_report_contract(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
         "schema_version": "1.0",
         "facts": facts,
         "derived_metrics": derived_metrics,
-        "estimates": {
-            "dynamic_transcript_tokens": dynamic_estimate,
-            "measurement": "character-based heuristic; not billable token accounting",
-        },
+        "estimates": _contract_estimates(legacy, diagnosis),
         "heuristic_flags": heuristic_flags,
         "data_gaps": data_gaps,
-        "sessions": legacy.get("sessions", legacy.get("transcripts", [])),
-        "calls": legacy.get("call_timeline", []),
+        "sessions": sessions,
+        "calls": calls,
         "deprecated": deprecated,
     }
 
@@ -2052,10 +2118,15 @@ def build_llm_package(report: Dict[str, Any]) -> Dict[str, Any]:
     compact_calls = []
     for call in calls if isinstance(calls, list) else []:
         if isinstance(call, dict) and call.get("large_cache_creation"):
-            compact_calls.append({key: call.get(key) for key in (
-                "timestamp", "session_id", "model", "context_input_tokens",
-                "cache_creation_input_tokens", "cache_ttl", "cache_creation_classification",
-            )})
+            compact_calls.append({
+                "timestamp": call.get("timestamp"),
+                "session_id": call.get("session_id"),
+                "model": call.get("model"),
+                "context_input_tokens": call.get("context_input_tokens"),
+                "cache_creation_input_tokens": call.get("cache_creation_input_tokens"),
+                "cache_ttl": call.get("cache_ttl"),
+                "cache_creation_classification": call.get("cache_creation_classification"),
+            })
     model_processed = metrics.get("models_processed", {})
     model_shares = {
         model: {
@@ -2084,14 +2155,17 @@ def build_llm_package(report: Dict[str, Any]) -> Dict[str, Any]:
 
 def llm_package_markdown(package: Dict[str, Any]) -> str:
     """Render the compact package with the same semantic content as JSON."""
-    lines = ["# Usage analysis LLM package", "", "## Interpretation constraints", ""]
+    lines = ["# Usage analysis LLM package", "", "## Schema", "", "```json",
+             json.dumps({"schema_version": package.get("schema_version")}, ensure_ascii=False, indent=2),
+             "```", "", "## Interpretation constraints", ""]
     constraints = package.get("interpretation_constraints", {})
     lines.append(f"- Processed input equals quota: {constraints.get('processed_input_equals_quota')}")
     lines.append(f"- {constraints.get('statement', '')}")
     for heading, key in (
         ("Account window", "account_window"), ("Context distribution", "context_distribution"),
         ("Model processed shares", "model_processed_shares"), ("Sessions and turns", "sessions"),
-        ("Cache flags", "cache_flags"), ("Limit incidents", "limit_incidents"),
+        ("Cache flags", "cache_flags"), ("Large cache creation evidence", "large_cache_creation_evidence"),
+        ("Limit incidents", "limit_incidents"),
         ("Estimates", "estimates"), ("Data gaps", "data_gaps"),
     ):
         lines.extend(["", f"## {heading}", ""])

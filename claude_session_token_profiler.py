@@ -1538,9 +1538,9 @@ def compact_duration(seconds: Optional[int]) -> str:
 
 
 def print_period_diagnosis(summary: Dict[str, Any], lang: str) -> None:
-    """Print the period's actionable diagnosis before supporting details."""
+    """Print the period's fact summary before supporting details."""
     if lang != "zh":
-        print("[PERIOD DIAGNOSIS]")
+        print("[PERIOD FACTS]")
         print_rule()
         print(f"Result: {summary.get('status', 'unknown')}")
         return
@@ -1560,60 +1560,25 @@ def print_period_diagnosis(summary: Dict[str, Any], lang: str) -> None:
     print("\n主要责任会话：")
     print(sid)
     print(f"贡献 {summary.get('responsible_processed_pct', 0):.1f}% 的处理输入")
-    print("\n最大风险：")
-    print("① 长上下文")
+    print("\n[上下文分布]")
     print(f"   峰值 {human_tokens(summary.get('peak_context', 0))}")
     distribution = summary.get("context_distribution", {})
     percentiles = distribution.get("percentiles", {})
     print("   P50/P75/P90/P95 " + "/".join(
         human_tokens(percentiles.get(key, 0)) for key in ("p50", "p75", "p90", "p95")
     ))
-    print("\n② Prompt Cache整段重写")
+    print("\n[缓存创建事实]")
     print(f"   {summary.get('full_rewrite_count', 0)}次，共{human_tokens(summary.get('full_rewrite_tokens', 0))}")
     print(f"   占cache write {summary.get('full_rewrite_cache_write_pct', 0):.1f}%")
-    print("\n③ 最近一次大重写")
+    print("\n[最近一次大缓存创建]")
     rw_at = summary.get("latest_rewrite_at")
     rw_time = rw_at.astimezone().strftime("%H:%M:%S") if isinstance(rw_at, datetime) else "-"
     print(f"   {rw_time} {human_tokens(summary.get('latest_rewrite_context', 0))}")
     proximity = summary.get("latest_rewrite_seconds_before_limit")
     print(f"   距额度耗尽仅{proximity}秒" if proximity is not None else "   与额度耗尽的时间关系未知")
-    print("\n④ Thinking膨胀")
+    print("\n[Thinking 估算]")
     print(f"   本周期 ~{human_tokens(summary.get('thinking_estimate', 0))}")
     print(f"   其中{sid} ~{human_tokens(summary.get('responsible_thinking', 0))}")
-    print("\n建议：")
-    print(f"优先 compact/clear {sid}；")
-    print("避免500k+ session长时间挂起后继续resume；")
-    print("普通任务减少Opus高effort使用。")
-
-
-def _legacy_diagnosis_reference(metrics: Dict[str, Any], lang: str) -> None:
-    zh = lang == "zh"
-    print("\n[诊断摘要]" if zh else "\n[DIAGNOSTIC SUMMARY]")
-    print_rule()
-    if zh:
-        print(f"严重程度                 : {metrics['severity']}")
-        print(f"峰值单次输入上下文         : {human_tokens(metrics['peak_context'])}")
-        print(f">150k 上下文调用           : {metrics['long_context_calls']}/{metrics['api_calls']} ({metrics['long_context_call_pct']:.1f}%)")
-        print(f">150k 调用贡献的处理输入    : {human_tokens(metrics['long_context_processed'])} ({metrics['long_context_processed_pct']:.1f}%)")
-        print(f"FULL_REWRITE             : {metrics['full_rewrite_count']} 次 / {human_tokens(metrics['full_rewrite_tokens'])}")
-        print(f"FULL_REWRITE 占缓存写入    : {metrics['full_rewrite_cache_write_pct']:.1f}%")
-        print(f"Claude 思考内容估算         : ~{human_tokens(metrics['thinking_estimate'])}")
-        print(f"检测到 5 小时额度事件       : {metrics['limit_events']} 次")
-        factors = []
-        if metrics['peak_context'] > 150_000: factors.append("超长上下文反复进入模型")
-        if metrics['full_rewrite_count']: factors.append("大段 Prompt Cache 未命中/重写")
-        if metrics['thinking_estimate'] > 50_000: factors.append("Thinking 持续扩大会话历史")
-        if metrics['api_calls'] >= 30: factors.append("模型/API 调用次数较多")
-        print("主要消耗因素             : " + ("；".join(factors) if factors else "未发现明显异常"))
-    else:
-        print(f"Severity                  : {metrics['severity']}")
-        print(f"Peak request context      : {human_tokens(metrics['peak_context'])}")
-        print(f">150k context calls       : {metrics['long_context_calls']}/{metrics['api_calls']} ({metrics['long_context_call_pct']:.1f}%)")
-        print(f">150k processed share     : {human_tokens(metrics['long_context_processed'])} ({metrics['long_context_processed_pct']:.1f}%)")
-        print(f"FULL_REWRITE              : {metrics['full_rewrite_count']} / {human_tokens(metrics['full_rewrite_tokens'])}")
-        print(f"Rewrite share of cacheW   : {metrics['full_rewrite_cache_write_pct']:.1f}%")
-        print(f"Thinking estimate         : ~{human_tokens(metrics['thinking_estimate'])}")
-        print(f"5h limit events           : {metrics['limit_events']}")
 
 
 def print_diagnosis(metrics: Dict[str, Any], lang: str) -> None:

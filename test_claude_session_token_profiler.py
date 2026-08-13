@@ -76,6 +76,17 @@ class ContextDistributionTests(unittest.TestCase):
             "processed_pct": 75.0,
         })
 
+    def test_custom_observation_threshold_is_printed(self):
+        calls = [profiler.ApiCall("main", "a", 1, cache_read=200_000)]
+        metrics = profiler.diagnosis_metrics(calls, profiler.collections.Counter(), [])
+        metrics["context_distribution"] = profiler.context_distribution(calls, [123_456])
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            profiler.print_diagnosis(metrics, "en")
+
+        self.assertIn(">123.5k context", out.getvalue())
+
 
 class PeriodDiagnosisTests(unittest.TestCase):
     def test_summary_identifies_responsible_session_and_rewrite_proximity(self):
@@ -158,7 +169,30 @@ class PeriodDiagnosisTests(unittest.TestCase):
         self.assertIn("周期：18:00 → 23:00", rendered)
         self.assertIn("耗尽耗时：4h40m36s", rendered)
         self.assertIn("距额度耗尽仅52秒", rendered)
-        self.assertIn("优先 compact/clear b4017db4", rendered)
+        self.assertIn("P50/P75/P90/P95", rendered)
+
+
+    def test_period_summary_uses_fact_only_context_output(self):
+        summary = {
+            "status": "unknown",
+            "start": dt(18, 0),
+            "end": dt(23, 0),
+            "context_distribution": {
+                "percentiles": {"p50": 100_000, "p75": 200_000, "p90": 300_000, "p95": 400_000},
+                "max": 500_000,
+                "buckets": {},
+            },
+        }
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            profiler.print_period_diagnosis(summary, "zh")
+
+        rendered = out.getvalue()
+        self.assertIn("P50/P75/P90/P95", rendered)
+        self.assertNotIn(">150k", rendered)
+        self.assertNotIn("500k+", rendered)
+        self.assertNotIn("Severity", rendered)
 
 
 class RewriteMetricTests(unittest.TestCase):

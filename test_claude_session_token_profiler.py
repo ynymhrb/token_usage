@@ -146,7 +146,7 @@ class ReportContractTests(unittest.TestCase):
         self.assertEqual(report["facts"]["totals"]["processed"], 123)
         self.assertEqual(report["estimates"]["dynamic_transcript_tokens"]["assistant:thinking"], 42)
         self.assertIn("severity", report["deprecated"])
-        self.assertEqual(report["calls"][0]["request_id"], "full-request-id")
+        self.assertNotIn("request_id", report["calls"][0])
 
     def test_llm_package_is_compact_and_states_quota_and_device_gaps(self):
         package = profiler.build_llm_package(profiler.build_report_contract(self.sample_legacy_report()))
@@ -168,10 +168,12 @@ class ReportContractTests(unittest.TestCase):
                     "request_id": "single-session-full-request-id", "timestamp": "when", "model": "model-a",
                     "context_input_tokens": 200, "cache_read_input_tokens": 100,
                     "cache_creation_input_tokens": 100, "output_tokens_jsonl_snapshot": 5,
+                    "turn": 1,
                     "large_cache_creation": True,
                     "cache_creation_classification": {"kind": "initial-cache-population"},
                     "preceding_transcript_estimate": {"user:text": 999},
-                }, {"request_id": "another-full-request-id", "context_input_tokens": 100, "model": "model-b"}],
+                }, {"request_id": "another-full-request-id", "context_input_tokens": 100,
+                    "model": "model-b", "turn": 2}],
             }],
         }
 
@@ -182,12 +184,21 @@ class ReportContractTests(unittest.TestCase):
         self.assertEqual(contract["sessions"][0]["processed"], 300)
         self.assertEqual(contract["estimates"]["dynamic_transcript_tokens"]["assistant:thinking"], 70)
         self.assertNotIn("thinking_estimate", contract["derived_metrics"])
+        self.assertNotIn("thinking_estimate", json.dumps(contract["facts"]))
+        self.assertNotIn("preceding_transcript_estimate", json.dumps(contract["derived_metrics"]))
+        self.assertNotIn("preceding_transcript_estimate", json.dumps(contract["calls"]))
+        self.assertNotIn("cache_creation_classification", json.dumps(contract["calls"]))
+        self.assertNotIn("full_cache_rewrite", json.dumps(contract["calls"]))
+        self.assertIn("classification", json.dumps(contract["heuristic_flags"]))
         serialized = json.dumps(package)
         self.assertNotIn("request_id", serialized)
         self.assertNotIn("single-session-full-request-id", serialized)
         self.assertNotIn("secret-transcript-path", serialized)
         self.assertEqual(package["sessions"][0]["processed_share_pct"], 100.0)
         self.assertEqual(package["sessions"][0]["session_id"], "main-session-id")
+        self.assertEqual(package["model_processed_shares"]["model-a"]["processed_share_pct"], 200 / 3)
+        self.assertEqual(package["model_processed_shares"]["model-b"]["processed_share_pct"], 100 / 3)
+        self.assertEqual(package["sessions"][0]["turns"][0]["processed_share_pct"], 200 / 3)
 
     def test_markdown_carries_schema_and_large_cache_evidence_semantics(self):
         package = profiler.build_llm_package(profiler.build_report_contract(self.sample_legacy_report()))

@@ -1933,7 +1933,50 @@ def _without_estimate_fields(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _contract_sessions_and_calls(legacy: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def _normalized_contract_call(
+    call: Dict[str, Any], session_id: Any = None, actor: Any = None,
+) -> Dict[str, Any]:
+    """Keep only exact JSONL facts and deterministic attribution in public calls."""
+    normalized = {
+        "timestamp": call.get("timestamp"),
+        "session_id": call.get("session_id", session_id),
+        "actor": call.get("actor", actor),
+        "model": call.get("model"),
+        "input_tokens": call.get("input_tokens"),
+        "cache_read_input_tokens": call.get("cache_read_input_tokens"),
+        "cache_creation_input_tokens": call.get("cache_creation_input_tokens"),
+        "output_tokens": call.get("output_tokens", call.get("output_tokens_jsonl_snapshot")),
+        "cache_creation_5m_tokens": call.get("cache_creation_5m_tokens"),
+        "cache_creation_1h_tokens": call.get("cache_creation_1h_tokens"),
+        "context_input_tokens": call.get("context_input_tokens"),
+        "measurement": call.get("measurement", "exact-jsonl-usage"),
+    }
+    if isinstance(call.get("turn"), int):
+        normalized["turn"] = call["turn"]
+    return {key: value for key, value in normalized.items() if value is not None}
+
+
+def _safe_turns(calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Provide title-free turn aggregates when a single-session report lacks them."""
+    groups: "collections.OrderedDict[int, List[Dict[str, Any]]]" = collections.OrderedDict()
+    for call in calls:
+        turn = call.get("turn")
+        turn_number = turn if isinstance(turn, int) and turn > 0 else 1
+        groups.setdefault(turn_number, []).append(call)
+    return [{
+        "round": round_number,
+        "calls": len(group),
+        "processed": sum(int(call.get("context_input_tokens") or 0) for call in group),
+        "cache_read": sum(int(call.get("cache_read_input_tokens") or 0) for call in group),
+        "cache_write": sum(int(call.get("cache_creation_input_tokens") or 0) for call in group),
+        "output": sum(int(call.get("output_tokens") or 0) for call in group),
+        "peak_context": max((int(call.get("context_input_tokens") or 0) for call in group), default=0),
+    } for round_number, group in groups.items()]
+
+
+def _contract_sessions_and_calls(
+    legacy: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Normalize period rows and single-session transcript rows to one shape."""
     if isinstance(legacy.get("sessions"), list):
         sessions = []
@@ -1946,31 +1989,38 @@ def _contract_sessions_and_calls(legacy: Dict[str, Any]) -> Tuple[List[Dict[str,
                 if isinstance(turn, dict)
             ]
             sessions.append(normalized)
-        return sessions, list(legacy.get("call_timeline") or [])
+        raw_calls = [call for call in legacy.get("call_timeline", []) if isinstance(call, dict)]
+        return sessions, [_normalized_contract_call(call) for call in raw_calls], raw_calls
 
     sessions = []
     calls: List[Dict[str, Any]] = []
+    raw_calls: List[Dict[str, Any]] = []
     main_session_id = legacy.get("session_id")
     for transcript in legacy.get("transcripts", []):
         if not isinstance(transcript, dict):
             continue
         transcript_calls = [call for call in transcript.get("calls", []) if isinstance(call, dict)]
-        calls.extend(transcript_calls)
-        processed = sum(int(call.get("context_input_tokens") or 0) for call in transcript_calls)
         actor = str(transcript.get("actor") or "")
+        transcript_session_id = main_session_id if actor == "main" and main_session_id else actor
+        normalized_calls = [
+            _normalized_contract_call(call, transcript_session_id, actor) for call in transcript_calls
+        ]
+        calls.extend(normalized_calls)
+        raw_calls.extend(transcript_calls)
+        processed = sum(int(call.get("context_input_tokens") or 0) for call in normalized_calls)
         sessions.append({
-            "session_id": main_session_id if actor == "main" and main_session_id else actor,
+            "session_id": transcript_session_id,
             "actor": actor,
-            "calls": len(transcript_calls),
+            "calls": len(normalized_calls),
             "processed": processed,
-            "cache_read": sum(int(call.get("cache_read_input_tokens") or 0) for call in transcript_calls),
-            "cache_write": sum(int(call.get("cache_creation_input_tokens") or 0) for call in transcript_calls),
-            "output": sum(int(call.get("output_tokens_jsonl_snapshot") or 0) for call in transcript_calls),
-            "peak_context": max((int(call.get("context_input_tokens") or 0) for call in transcript_calls), default=0),
+            "cache_read": sum(int(call.get("cache_read_input_tokens") or 0) for call in normalized_calls),
+            "cache_write": sum(int(call.get("cache_creation_input_tokens") or 0) for call in normalized_calls),
+            "output": sum(int(call.get("output_tokens") or 0) for call in normalized_calls),
+            "peak_context": max((int(call.get("context_input_tokens") or 0) for call in normalized_calls), default=0),
             "parse_errors": len(transcript.get("parse_errors") or []),
-            "turns": [],
+            "turns": _safe_turns(normalized_calls),
         })
-    return sessions, calls
+    return sessions, calls, raw_calls
 
 
 def _contract_estimates(legacy: Dict[str, Any], diagnosis: Dict[str, Any]) -> Dict[str, Any]:
@@ -1978,7 +2028,12 @@ def _contract_estimates(legacy: Dict[str, Any], diagnosis: Dict[str, Any]) -> Di
     dynamic = collections.Counter(legacy.get("dynamic_estimate") or {})
     for transcript in legacy.get("transcripts", []):
         if isinstance(transcript, dict):
-            dynamic.update(transcript.get("estimated_dynamic_categories") or {})
+            transcript_estimates = transcript.get("estimated_dynamic_categories") or {}
+            dynamic.update(transcript_estimates)
+            if not transcript_estimates:
+                for call in transcript.get("calls", []):
+                    if isinstance(call, dict):
+                        dynamic.update(call.get("preceding_transcript_estimate") or {})
     estimates: Dict[str, Any] = {
         "dynamic_transcript_tokens": dict(dynamic),
         "measurement": "character-based heuristic; not billable token accounting",
@@ -2003,7 +2058,7 @@ def build_report_contract(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
     """
     legacy = dict(legacy_report)
     diagnosis = dict(legacy.get("diagnosis") or {})
-    sessions, calls = _contract_sessions_and_calls(legacy)
+    sessions, calls, raw_calls = _contract_sessions_and_calls(legacy)
     period = legacy.get("period")
     session_range = legacy.get("session_time_range")
     account_window = legacy.get("account_five_hour_window")
@@ -2034,7 +2089,7 @@ def build_report_contract(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     heuristic_flags: List[Dict[str, Any]] = []
-    for call in calls:
+    for call in raw_calls:
         if not isinstance(call, dict):
             continue
         classification = call.get("cache_creation_classification")
@@ -2042,7 +2097,7 @@ def build_report_contract(legacy_report: Dict[str, Any]) -> Dict[str, Any]:
             heuristic_flags.append({
                 "type": "LARGE_CACHE_CREATION",
                 "timestamp": call.get("timestamp"),
-                "session_id": call.get("session_id"),
+                "session_id": call.get("session_id", legacy.get("session_id")),
                 "model": call.get("model"),
                 "classification": classification,
             })
@@ -2097,7 +2152,7 @@ def build_llm_package(report: Dict[str, Any]) -> Dict[str, Any]:
             if isinstance(turn, dict):
                 compact_turn = {key: turn.get(key) for key in (
                     "round", "calls", "processed", "cache_read", "cache_write", "output",
-                    "peak_context", "rewrites", "thinking",
+                    "peak_context", "rewrites",
                 )}
                 turn_processed = int(turn.get("processed") or 0)
                 compact_turn["processed_share_pct"] = (
@@ -2115,19 +2170,17 @@ def build_llm_package(report: Dict[str, Any]) -> Dict[str, Any]:
             "peak_context": session.get("peak_context"),
             "turns": turns,
         })
-    compact_calls = []
-    for call in calls if isinstance(calls, list) else []:
-        if isinstance(call, dict) and call.get("large_cache_creation"):
-            compact_calls.append({
-                "timestamp": call.get("timestamp"),
-                "session_id": call.get("session_id"),
-                "model": call.get("model"),
-                "context_input_tokens": call.get("context_input_tokens"),
-                "cache_creation_input_tokens": call.get("cache_creation_input_tokens"),
-                "cache_ttl": call.get("cache_ttl"),
-                "cache_creation_classification": call.get("cache_creation_classification"),
-            })
+    cache_flags = report.get("heuristic_flags", [])
+    compact_calls = [
+        flag for flag in cache_flags
+        if isinstance(flag, dict) and flag.get("type") == "LARGE_CACHE_CREATION"
+    ]
     model_processed = metrics.get("models_processed", {})
+    if not isinstance(model_processed, dict) or not model_processed:
+        model_processed = collections.Counter()
+        for call in calls if isinstance(calls, list) else []:
+            if isinstance(call, dict):
+                model_processed[str(call.get("model") or "?")] += int(call.get("context_input_tokens") or 0)
     model_shares = {
         model: {
             "processed": int(processed or 0),
@@ -2141,7 +2194,7 @@ def build_llm_package(report: Dict[str, Any]) -> Dict[str, Any]:
         "context_distribution": metrics.get("context_distribution", {}),
         "model_processed_shares": model_shares,
         "sessions": compact_sessions,
-        "cache_flags": report.get("heuristic_flags", []),
+        "cache_flags": cache_flags,
         "large_cache_creation_evidence": compact_calls,
         "limit_incidents": facts.get("limit_incidents", []),
         "estimates": report.get("estimates", {}),

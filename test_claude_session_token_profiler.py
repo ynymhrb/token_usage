@@ -229,6 +229,66 @@ class PeriodDiagnosisTests(unittest.TestCase):
 
 
 class RewriteMetricTests(unittest.TestCase):
+    def test_first_large_write_is_initial_population_not_rewrite(self):
+        call = profiler.ApiCall(
+            actor="main", request_id="1", line=1,
+            cache_write=200_000, cache_write_1h=200_000,
+        )
+
+        flag = profiler.classify_cache_creation(call, previous_call=None)
+
+        self.assertTrue(profiler.is_large_cache_creation(call))
+        self.assertTrue(profiler.is_full_rewrite(call))
+        self.assertEqual(flag["kind"], "initial-cache-population")
+        self.assertEqual(flag["confidence"], "high")
+        self.assertEqual(flag["cache_write_tokens"], 200_000)
+        self.assertEqual(flag["ttl"], "1h")
+
+    def test_zero_read_after_similar_cached_context_is_possible_recreation(self):
+        previous = profiler.ApiCall(
+            actor="main", request_id="1", line=1,
+            timestamp=dt(21, 37).isoformat(), cache_read=190_000,
+        )
+        call = profiler.ApiCall(
+            actor="main", request_id="2", line=2,
+            timestamp=dt(22, 39).isoformat(), cache_write=200_000,
+            cache_write_1h=200_000,
+        )
+
+        flag = profiler.classify_cache_creation(
+            call, previous_call=previous, idle_seconds=3700,
+        )
+
+        self.assertEqual(flag["kind"], "possible-cache-recreation")
+        self.assertIn(flag["confidence"], {"medium", "low"})
+        self.assertIn("prior-cache-read", flag["evidence"])
+        self.assertIn("read-to-write-transition", flag["evidence"])
+        self.assertIn("idle-exceeds-declared-ttl", flag["heuristic_flags"])
+
+    def test_timeline_uses_prior_same_actor_evidence_for_recreation(self):
+        first = profiler.ApiCall(
+            actor="main", request_id="1", line=1,
+            timestamp=dt(18, 5).isoformat(), cache_write=200_000,
+            cache_write_1h=200_000,
+        )
+        prior = profiler.ApiCall(
+            actor="main", request_id="2", line=2,
+            timestamp=dt(21, 37).isoformat(), cache_read=200_000,
+        )
+        recreation = profiler.ApiCall(
+            actor="main", request_id="3", line=3,
+            timestamp=dt(22, 39).isoformat(), cache_write=200_000,
+            cache_write_1h=200_000,
+        )
+
+        flags = profiler.classify_cache_creations([first, prior, recreation])
+        record = profiler.call_timeline_record(recreation, flags[id(recreation)])
+
+        self.assertEqual(flags[id(first)]["kind"], "initial-cache-population")
+        self.assertEqual(record["cache_creation_classification"]["kind"], "possible-cache-recreation")
+        self.assertTrue(record["large_cache_creation"])
+        self.assertTrue(record["full_cache_rewrite"])
+
     def test_rewrite_details_include_ratio_and_cache_ttl(self):
         call = profiler.ApiCall(
             actor="main",
@@ -245,7 +305,7 @@ class RewriteMetricTests(unittest.TestCase):
         self.assertTrue(details["is_full_rewrite"])
         self.assertAlmostEqual(details["rewrite_ratio"], 140_000 / 150_000)
         self.assertEqual(details["ttl"], "1h")
-        self.assertEqual(details["likely_cause"], "1h-cache-miss-or-expiry")
+        self.assertEqual(details["likely_cause"], "initial-cache-population")
 
     def test_call_timeline_record_exposes_exact_usage_and_rewrite_evidence(self):
         call = profiler.ApiCall(
@@ -266,8 +326,22 @@ class RewriteMetricTests(unittest.TestCase):
         self.assertEqual(record["session_id"], "b4017db4")
         self.assertEqual(record["context_input_tokens"], 571_302)
         self.assertEqual(record["cache_ttl"], "1h")
+        self.assertTrue(record["large_cache_creation"])
+        self.assertEqual(record["cache_creation_classification"]["kind"], "initial-cache-population")
         self.assertTrue(record["full_cache_rewrite"])
+        self.assertTrue(record["full_cache_rewrite_deprecated"])
         self.assertEqual(record["measurement"], "exact-jsonl-usage")
+
+    def test_diagnosis_exposes_new_metric_and_deprecated_compatibility_fields(self):
+        metrics = profiler.diagnosis_metrics(
+            [profiler.ApiCall("main", "1", 1, cache_write=200_000)],
+            profiler.collections.Counter(), [],
+        )
+
+        self.assertEqual(metrics["large_cache_creation_count"], 1)
+        self.assertEqual(metrics["large_cache_creation_tokens"], 200_000)
+        self.assertTrue(metrics["full_rewrite_metrics_deprecated"])
+        self.assertEqual(metrics["full_rewrite_count"], 1)
 
 
 class ConversationTurnTests(unittest.TestCase):

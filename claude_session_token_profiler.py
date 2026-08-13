@@ -562,45 +562,148 @@ def call_dt(c: ApiCall) -> Optional[datetime]:
     return parse_dt(c.timestamp)
 
 
-def is_full_rewrite(c: ApiCall) -> bool:
+def cache_ttl(c: ApiCall) -> str:
+    """Return the cache TTL explicitly declared in the JSONL usage record."""
+    if c.cache_write_1h and c.cache_write_5m:
+        return "mixed"
+    if c.cache_write_1h:
+        return "1h"
+    if c.cache_write_5m:
+        return "5m"
+    return "unknown" if c.cache_write else "none"
+
+
+def is_large_cache_creation(
+    c: ApiCall, min_tokens: int = 100_000, min_ratio: float = 0.70,
+) -> bool:
+    """Whether one call observably contains a large cache creation.
+
+    This is a measurement threshold, not a claim about why the cache was created.
+    """
     ctx = c.context_input
-    if ctx < 100_000 or c.cache_write < 100_000:
-        return False
-    return c.cache_write >= int(ctx * 0.70) and c.cache_read <= max(10_000, int(ctx * 0.08))
+    return bool(
+        ctx and c.cache_write >= min_tokens and c.cache_write / ctx >= min_ratio
+    )
+
+
+def is_full_rewrite(c: ApiCall) -> bool:
+    """Deprecated compatibility alias for :func:`is_large_cache_creation`."""
+    return is_large_cache_creation(c)
+
+
+def classify_cache_creation(
+    c: ApiCall, previous_call: Optional[ApiCall] = None,
+    idle_seconds: Optional[float] = None, min_tokens: int = 100_000,
+    min_ratio: float = 0.70,
+) -> Dict[str, Any]:
+    """Classify a large cache creation using observable request transitions.
+
+    TTL expiry is deliberately never stated as a fact.  An idle interval longer
+    than a declared TTL is exposed only as a heuristic flag.
+    """
+    ttl = cache_ttl(c)
+    creation_ratio = c.cache_write / c.context_input if c.context_input else 0.0
+    evidence = [
+        f"cache-write-tokens:{c.cache_write}",
+        f"creation-ratio:{creation_ratio:.3f}",
+        f"declared-ttl:{ttl}",
+    ]
+    heuristic_flags: List[str] = []
+    if not is_large_cache_creation(c, min_tokens, min_ratio):
+        return {
+            "kind": "not-large-cache-creation", "confidence": "high",
+            "evidence": evidence, "heuristic_flags": heuristic_flags,
+            "cache_write_tokens": c.cache_write, "creation_ratio": creation_ratio,
+            "ttl": ttl,
+        }
+
+    if previous_call is None:
+        evidence.append("no-prior-same-actor-request")
+        return {
+            "kind": "initial-cache-population", "confidence": "high",
+            "evidence": evidence, "heuristic_flags": heuristic_flags,
+            "cache_write_tokens": c.cache_write, "creation_ratio": creation_ratio,
+            "ttl": ttl,
+        }
+
+    same_actor = previous_call.actor == c.actor
+    if same_actor:
+        evidence.append("prior-same-actor-request")
+    else:
+        evidence.append("prior-request-different-actor")
+    if previous_call.cache_read > 0:
+        evidence.append("prior-cache-read")
+    if previous_call.cache_read > 0 and c.cache_read == 0:
+        evidence.append("read-to-write-transition")
+    if idle_seconds is not None:
+        evidence.append(f"idle-seconds:{int(idle_seconds)}")
+    if previous_call.context_input and c.context_input:
+        similarity = min(previous_call.context_input, c.context_input) / max(
+            previous_call.context_input, c.context_input
+        )
+        evidence.append(f"context-similarity:{similarity:.3f}")
+    else:
+        similarity = 0.0
+
+    ttl_seconds = {"5m": 300, "1h": 3600}.get(ttl)
+    if ttl_seconds is not None and idle_seconds is not None and idle_seconds >= ttl_seconds:
+        heuristic_flags.append("idle-exceeds-declared-ttl")
+
+    recreation_evidence = (
+        same_actor and previous_call.cache_read > 0 and c.cache_read == 0
+        and similarity >= 0.70
+    )
+    if recreation_evidence:
+        confidence = "medium" if idle_seconds is not None else "low"
+        return {
+            "kind": "possible-cache-recreation", "confidence": confidence,
+            "evidence": evidence, "heuristic_flags": heuristic_flags,
+            "cache_write_tokens": c.cache_write, "creation_ratio": creation_ratio,
+            "ttl": ttl,
+        }
+    return {
+        "kind": "large-cache-creation-unknown", "confidence": "low",
+        "evidence": evidence, "heuristic_flags": heuristic_flags,
+        "cache_write_tokens": c.cache_write, "creation_ratio": creation_ratio,
+        "ttl": ttl,
+    }
+
+
+def classify_cache_creations(calls: Iterable[ApiCall]) -> Dict[int, Dict[str, Any]]:
+    """Classify calls chronologically, comparing only prior calls by actor."""
+    previous_by_actor: Dict[str, ApiCall] = {}
+    flags: Dict[int, Dict[str, Any]] = {}
+    ordered = sorted(calls, key=lambda c: call_dt(c) or datetime.min.replace(tzinfo=timezone.utc))
+    for c in ordered:
+        previous = previous_by_actor.get(c.actor)
+        current_dt, previous_dt = call_dt(c), call_dt(previous) if previous else None
+        idle_seconds = (
+            max(0.0, (current_dt - previous_dt).total_seconds())
+            if current_dt and previous_dt else None
+        )
+        flags[id(c)] = classify_cache_creation(c, previous, idle_seconds)
+        previous_by_actor[c.actor] = c
+    return flags
 
 
 def cache_rewrite_details(c: ApiCall) -> Dict[str, Any]:
-    """Return explainable cache-rewrite metrics for one API call."""
+    """Deprecated compatibility view of a cache creation classification."""
     ctx = c.context_input
-    if c.cache_write_1h and c.cache_write_5m:
-        ttl = "mixed"
-    elif c.cache_write_1h:
-        ttl = "1h"
-    elif c.cache_write_5m:
-        ttl = "5m"
-    else:
-        ttl = "unknown" if c.cache_write else "none"
-    full_rewrite = is_full_rewrite(c)
-    if not full_rewrite:
-        likely_cause = "incremental-cache-write" if c.cache_write else "none"
-    elif ttl == "1h":
-        likely_cause = "1h-cache-miss-or-expiry"
-    elif ttl == "5m":
-        likely_cause = "5m-cache-miss-or-expiry"
-    else:
-        likely_cause = "cold-start-or-cache-invalidation"
+    flag = classify_cache_creation(c)
     return {
-        "is_full_rewrite": full_rewrite,
+        "is_full_rewrite": is_large_cache_creation(c),
         "rewrite_ratio": (c.cache_write / ctx) if ctx else 0.0,
-        "ttl": ttl,
-        "likely_cause": likely_cause,
+        "ttl": flag["ttl"],
+        "likely_cause": flag["kind"],
         "cache_write_5m": c.cache_write_5m,
         "cache_write_1h": c.cache_write_1h,
     }
 
 
-def call_timeline_record(c: ApiCall) -> Dict[str, Any]:
-    details = cache_rewrite_details(c)
+def call_timeline_record(
+    c: ApiCall, classification: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    classification = classification or classify_cache_creation(c)
     actor_session = c.actor.split(":", 1)[-1].split("/", 1)[0]
     return {
         "timestamp": fmt_dt(call_dt(c)),
@@ -613,10 +716,12 @@ def call_timeline_record(c: ApiCall) -> Dict[str, Any]:
         "cache_creation_input_tokens": c.cache_write,
         "output_tokens": c.output_tokens,
         "context_input_tokens": c.context_input,
-        "full_cache_rewrite": details["is_full_rewrite"],
-        "rewrite_ratio": details["rewrite_ratio"],
-        "cache_ttl": details["ttl"],
-        "likely_rewrite_cause": details["likely_cause"],
+        "large_cache_creation": is_large_cache_creation(c),
+        "cache_creation_classification": classification,
+        "creation_ratio": classification["creation_ratio"],
+        "cache_ttl": classification["ttl"],
+        "full_cache_rewrite": is_large_cache_creation(c),
+        "full_cache_rewrite_deprecated": True,
         "measurement": "exact-jsonl-usage",
     }
 
@@ -687,7 +792,7 @@ def aggregate_conversation_turns(
     turns: List[Dict[str, Any]] = []
     for index, ((anchor_at, title), turn_calls) in enumerate(buckets.items(), 1):
         times = [call_dt(c) for c in turn_calls if call_dt(c)]
-        rewrites = [c for c in turn_calls if is_full_rewrite(c)]
+        rewrites = [c for c in turn_calls if is_large_cache_creation(c)]
         dynamic: collections.Counter[str] = collections.Counter()
         for call in turn_calls:
             dynamic.update(call.preceding_est)
@@ -996,7 +1101,7 @@ def build_five_hour_windows(
         w["cache_read"] = sum(c.cache_read for c in wcalls)
         w["cache_write"] = sum(c.cache_write for c in wcalls)
         w["output"] = sum(c.output_tokens for c in wcalls)
-        w["rewrites"] = sum(1 for c in wcalls if is_full_rewrite(c))
+        w["rewrites"] = sum(1 for c in wcalls if is_large_cache_creation(c))
     return windows, events
 
 
@@ -1477,7 +1582,7 @@ def diagnosis_metrics(
     all_calls: List[ApiCall], est_total: collections.Counter[str], limit_events: List[Dict[str, Any]],
     context_threshold: Optional[int] = None,
 ) -> Dict[str, Any]:
-    rewrites = [c for c in all_calls if is_full_rewrite(c)]
+    rewrites = [c for c in all_calls if is_large_cache_creation(c)]
     rewrite_tokens = sum(c.cache_write for c in rewrites)
     cache_write_total = sum(c.cache_write for c in all_calls)
     processed = sum(c.context_input for c in all_calls)
@@ -1488,9 +1593,15 @@ def diagnosis_metrics(
         "peak_context": max((c.context_input for c in all_calls), default=0),
         "processed": processed,
         "api_calls": len(all_calls),
+        "large_cache_creation_count": len(rewrites),
+        "large_cache_creation_tokens": rewrite_tokens,
+        "large_cache_creation_cache_write_pct": (
+            100.0 * rewrite_tokens / cache_write_total if cache_write_total else 0.0
+        ),
         "full_rewrite_count": len(rewrites),
         "full_rewrite_tokens": rewrite_tokens,
         "full_rewrite_cache_write_pct": (100.0 * rewrite_tokens / cache_write_total) if cache_write_total else 0.0,
+        "full_rewrite_metrics_deprecated": True,
         "thinking_estimate": thinking,
         "limit_events": len([e for e in limit_events if e.get("kind") == "five_hour_limit"]),
     }
@@ -1504,7 +1615,7 @@ def build_period_diagnosis(
     responsible = max(sessions, key=lambda s: int(s.get("processed", 0)), default={})
     total_processed = sum(int(s.get("processed", 0)) for s in sessions)
     responsible_processed = int(responsible.get("processed", 0))
-    rewrites = [c for c in calls if is_full_rewrite(c) and call_dt(c)]
+    rewrites = [c for c in calls if is_large_cache_creation(c) and call_dt(c)]
     latest_rewrite = max(rewrites, key=lambda c: call_dt(c), default=None)
     rewrite_at = call_dt(latest_rewrite) if latest_rewrite else None
     proximity = None
@@ -1597,7 +1708,7 @@ def print_diagnosis(metrics: Dict[str, Any], lang: str) -> None:
             f"{bucket['calls']}/{metrics['api_calls']} ({bucket['call_pct']:.1f}% calls), "
             f"{human_tokens(bucket['processed'])} ({bucket['processed_pct']:.1f}% processed)"
         )
-    print(f"Large cache creations     : {metrics['full_rewrite_count']} / {human_tokens(metrics['full_rewrite_tokens'])} ({metrics['full_rewrite_cache_write_pct']:.1f}% cache write)")
+    print(f"LARGE_CACHE_CREATION      : {metrics['large_cache_creation_count']} / {human_tokens(metrics['large_cache_creation_tokens'])} ({metrics['large_cache_creation_cache_write_pct']:.1f}% cache write)")
     print(f"Thinking estimate         : ~{human_tokens(metrics['thinking_estimate'])}")
     print(f"5h limit events           : {metrics['limit_events']}")
 
@@ -1698,11 +1809,12 @@ def report_analysis(
         rid = c.request_id[-12:] if len(c.request_id) > 12 else c.request_id
         print(f"{i:>3}  {fmt_short_dt(call_dt(c)):<17} {actor_label(c.actor, lang):<12.12} {human_tokens(c.context_input):>9} {human_tokens(c.cache_read):>9} {human_tokens(c.cache_write):>9} {human_tokens(c.output_tokens):>8}  {c.model:<22.22} {rid}")
 
-    rewrites = [c for c in all_calls if is_full_rewrite(c)]
-    print("\n[缓存失效 / 大段重写事件]" if zh else "\n[CACHE MISS / LARGE REWRITE EVENTS]")
+    classifications = classify_cache_creations(all_calls)
+    rewrites = [c for c in all_calls if is_large_cache_creation(c)]
+    print("\n[大额缓存创建事件]" if zh else "\n[LARGE CACHE CREATION EVENTS]")
     print_rule()
     if not rewrites:
-        print("未检测到明显的大段缓存重写。" if zh else "No obvious large cache rewrites detected.")
+        print("未检测到大额缓存创建。" if zh else "No large cache creations detected.")
     else:
         if zh:
             print(f"{'#':>3}  {'时间':<17} {'执行体':<12} {'上下文':>9} {'缓存读':>9} {'缓存写':>9} {'重写占比':>9}  类型")
@@ -1710,14 +1822,14 @@ def report_analysis(
             print(f"{'#':>3}  {'time':<17} {'actor':<12} {'context':>9} {'cacheR':>9} {'cacheW':>9} {'rewrite%':>9}  type")
         for i, c in enumerate(sorted(rewrites, key=lambda x: x.cache_write, reverse=True)[:top_n], 1):
             pct = 100*c.cache_write/max(1,c.context_input)
-            print(f"{i:>3}  {fmt_short_dt(call_dt(c)):<17} {actor_label(c.actor, lang):<12.12} {human_tokens(c.context_input):>9} {human_tokens(c.cache_read):>9} {human_tokens(c.cache_write):>9} {pct:>8.1f}%  FULL_REWRITE")
+            print(f"{i:>3}  {fmt_short_dt(call_dt(c)):<17} {actor_label(c.actor, lang):<12.12} {human_tokens(c.context_input):>9} {human_tokens(c.cache_read):>9} {human_tokens(c.cache_write):>9} {pct:>8.1f}%  LARGE_CACHE_CREATION/{classifications[id(c)]['kind']}")
 
     growth_rows: List[Tuple[int, ApiCall, int, str, int]] = []
     for a in analyses:
         ordered = sorted(a.calls, key=lambda c: call_dt(c) or datetime.min.replace(tzinfo=timezone.utc))
         prev: Optional[ApiCall] = None
         for c in ordered:
-            if prev is not None and prev.context_input > 0 and c.context_input > 0 and not is_full_rewrite(c):
+            if prev is not None and prev.context_input > 0 and c.context_input > 0 and not is_large_cache_creation(c):
                 delta = c.context_input - prev.context_input
                 est = sum(c.preceding_est.values())
                 if delta > 0 and est >= max(1000, int(delta * 0.20)):
@@ -1802,7 +1914,11 @@ def report_analysis(
                 "input_tokens": c.input_tokens, "cache_read_input_tokens": c.cache_read,
                 "cache_creation_input_tokens": c.cache_write, "output_tokens_jsonl_snapshot": c.output_tokens,
                 "cache_creation_5m_tokens": c.cache_write_5m, "cache_creation_1h_tokens": c.cache_write_1h,
-                "context_input_tokens": c.context_input, "full_cache_rewrite": is_full_rewrite(c),
+                "context_input_tokens": c.context_input,
+                "large_cache_creation": is_large_cache_creation(c),
+                "cache_creation_classification": classifications[id(c)],
+                "full_cache_rewrite": is_large_cache_creation(c),
+                "full_cache_rewrite_deprecated": True,
                 "preceding_transcript_estimate": dict(c.preceding_est),
             } for c in a.calls],
         })
@@ -1875,7 +1991,7 @@ def analyze_period(
         all_period_calls.extend(period_calls)
         for c in period_calls:
             models_processed[c.model] += c.context_input
-        rewrites = [c for c in period_calls if is_full_rewrite(c)]
+        rewrites = [c for c in period_calls if is_large_cache_creation(c)]
         dts = [call_dt(c) for c in period_calls if call_dt(c)]
         session_rows.append({
             "session_id": sid,
@@ -1909,6 +2025,7 @@ def analyze_period(
                 limit_events_all.append({**e,"session_id":main_path.stem})
 
     limit_incidents = collapse_limit_events(limit_events_all)
+    classifications = classify_cache_creations(all_period_calls)
     diag = diagnosis_metrics(all_period_calls, aggregate_dynamic, limit_incidents)
     diag["context_distribution"] = context_distribution(all_period_calls, context_thresholds)
     detected_limit_at = min(
@@ -1979,8 +2096,8 @@ def analyze_period(
         "cache_write": sum(c.cache_write for c in all_period_calls),
         "output": sum(c.output_tokens for c in all_period_calls),
         "processed": sum(c.context_input for c in all_period_calls),
-        "rewrite_tokens": sum(c.cache_write for c in all_period_calls if is_full_rewrite(c)),
-        "rewrites": sum(1 for c in all_period_calls if is_full_rewrite(c)),
+        "rewrite_tokens": sum(c.cache_write for c in all_period_calls if is_large_cache_creation(c)),
+        "rewrites": sum(1 for c in all_period_calls if is_large_cache_creation(c)),
     }
     if zh:
         print(f"有活动的会话             : {totals['sessions']}")
@@ -1989,7 +2106,7 @@ def analyze_period(
         print(f"缓存读取                 : {human_tokens(totals['cache_read'])}")
         print(f"缓存写入                 : {human_tokens(totals['cache_write'])}")
         print(f"输出                     : {human_tokens(totals['output'])}")
-        print(f"FULL_REWRITE            : {totals['rewrites']} 次 / {human_tokens(totals['rewrite_tokens'])}")
+        print(f"LARGE_CACHE_CREATION    : {totals['rewrites']} 次 / {human_tokens(totals['rewrite_tokens'])}")
         print("说明                     : 仅聚合本机 projects JSONL；Claude.ai、其他设备的消耗不会出现在 Token 汇总中。")
     else:
         print(f"Active sessions          : {totals['sessions']}")
@@ -2041,9 +2158,9 @@ def analyze_period(
                     f"rewrites {turn['rewrites']} | thinking~{human_tokens(turn['thinking'])}"
                 )
 
-    print("\n[周期内最大的缓存重写]" if zh else "\n[LARGEST CACHE REWRITES IN PERIOD]")
+    print("\n[周期内最大的大额缓存创建]" if zh else "\n[LARGEST LARGE CACHE CREATIONS IN PERIOD]")
     print_rule()
-    rw = sorted([c for c in all_period_calls if is_full_rewrite(c)],key=lambda c:c.cache_write,reverse=True)[:top_n]
+    rw = sorted([c for c in all_period_calls if is_large_cache_creation(c)],key=lambda c:c.cache_write,reverse=True)[:top_n]
     if not rw:
         print("无。" if zh else "None.")
     else:
@@ -2076,9 +2193,9 @@ def analyze_period(
         else:
             print(f"{fmt_short_dt(call_dt(c))} {sid} {c.model} ctx={human_tokens(c.context_input)} cacheR={human_tokens(c.cache_read)} cacheW={human_tokens(c.cache_write)} out={human_tokens(c.output_tokens)} rewrite={details['rewrite_ratio']*100:.1f}% ttl={details['ttl']}{marker}")
     if zh:
-        print("* = FULL_REWRITE；processed input 是本地归因指标，不等同于订阅额度的精确扣减。")
+        print("* = LARGE_CACHE_CREATION；processed input 是本地归因指标，不等同于订阅额度的精确扣减。")
     else:
-        print("* = FULL_REWRITE; processed input is a local attribution metric, not exact subscription billing.")
+        print("* = LARGE_CACHE_CREATION; processed input is a local attribution metric, not exact subscription billing.")
 
     print("\n[模型处理输入贡献]" if zh else "\n[MODEL PROCESSED-INPUT SHARE]")
     print_rule()
@@ -2104,7 +2221,10 @@ def analyze_period(
         },
         "totals":totals,"diagnosis":diag,"dynamic_estimate":dict(aggregate_dynamic),
         "period_diagnosis": {k:(fmt_dt(v) if isinstance(v,datetime) else v) for k,v in period_summary.items()},
-        "call_timeline": [call_timeline_record(c) for c in sorted(all_period_calls, key=lambda x: call_dt(x) or start)],
+        "call_timeline": [
+            call_timeline_record(c, classifications[id(c)])
+            for c in sorted(all_period_calls, key=lambda x: call_dt(x) or start)
+        ],
         "models_processed":dict(models_processed),
         "sessions":[{
             **s,
@@ -2242,7 +2362,7 @@ def main() -> int:
         print("- 5h 边界优先级：statusLine resets_at > JSONL 明确 resets 时间 > limit+下一次成功调用区间。")
     else:
         print("- Session mode diagnoses individual requests; period mode aggregates all local sessions in a time range.")
-        print("- FULL_REWRITE is a large prompt-cache miss/rewrite, not equivalent context growth.")
+        print("- LARGE_CACHE_CREATION is an observed large cache write, not equivalent context growth.")
         print("- 5h boundary priority: statusLine resets_at > explicit transcript reset text > limit/next-success bracket.")
     return 0
 

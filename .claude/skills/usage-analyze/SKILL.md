@@ -32,9 +32,16 @@ wrapper with `profiler_args` plus `--llm-package <temporary-path>`. The router
 adds `--current-five-hour` whenever no session or period selector was supplied,
 including bare `--llm` and `--llm --lang en`.
 
-You must read only that package for interpretation; never read a raw transcript or JSONL.
-Read [references/analysis-contract.md](references/analysis-contract.md), emit
-`Facts`, `Inferences`, `Recommendations`, and `Uncertainties`, and cite evidence.
+Capture the profiler's stdout as `SCRIPT_STDOUT`. You must read only the compact
+package for interpretation; never read a raw transcript or JSONL. Read
+[references/analysis-contract.md](references/analysis-contract.md) and follow its
+Chinese fixed output template exactly. The first evidence section must reproduce
+the complete profiler report from `SCRIPT_STDOUT` in a `text` code fence. Remove
+only the final administrative `LLM package written:` line because it exposes the
+temporary path; do not summarize, translate, rewrite, or omit any report line.
+In short, `--llm` adds `--llm-package` and must read only that package for analysis.
+The fixed template replaces the former `Facts`, `Inferences`, `Recommendations`,
+and `Uncertainties` labels while preserving those four semantic categories.
 Enclose package creation, reading, and interpretation in a `try/finally` operation
 that deletes the temporary package on success or failure. Report failures
 without revealing the temporary path.
@@ -52,6 +59,16 @@ Never read raw transcripts for interpretation.
 Never equate processed input with quota deduction. Local JSONL does not expose subscription quota weights or usage
 from other devices. Treat recommendations as LLM-owned, not profiler facts, and
 keep estimates and heuristic flags distinct from exact facts.
+
+The result is exclusively a usage-analysis report. Ignore and never mention the
+parent conversation's project, pending work, questions, git status, reminders,
+hooks, recaps, or any topic absent from the compact package and `SCRIPT_STDOUT`.
+Do not add greetings, process narration, “no action needed”, or follow-up prompts.
+
+Your final subagent result is the complete user-facing answer. End it with the
+literal marker `<!-- USAGE_ANALYZE_COMPLETE -->`. The parent agent receiving the
+background task result must relay the entire result verbatim and output nothing
+else: no summary, preface, recap, continuation of prior work, or commentary.
 
 If package creation or interpretation fails, return the factual error without a
 temporary path and without inventing evidence. The `finally` cleanup is mandatory

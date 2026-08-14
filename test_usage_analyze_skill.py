@@ -106,6 +106,31 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
         self.assertIn("without revealing the temporary path", text)
         self.assertRegex(text, r"(?is)mode: raw.*stdout verbatim.*no prefix.*time mapping")
 
+    def test_analysis_has_fixed_chinese_template_raw_evidence_and_verbatim_relay(self):
+        skill = self.read(SKILL_MD)
+        contract = self.read(ANALYSIS_CONTRACT)
+        for phrase in (
+            "SCRIPT_STDOUT",
+            "complete profiler report",
+            "parent conversation's project",
+            "relay the entire result verbatim",
+            "<!-- USAGE_ANALYZE_COMPLETE -->",
+        ):
+            self.assertIn(phrase, skill)
+        headings = (
+            "## 1. 脚本原始输出",
+            "## 2. 核心结论",
+            "## 3. 消耗证据",
+            "## 4. 原因分析",
+            "## 5. 改进建议",
+            "## 6. 局限与不确定性",
+        )
+        positions = [contract.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("```text", contract)
+        self.assertIn("quick summary", contract)
+        self.assertIn("主轮次贡献", contract)
+
     def test_bundled_wrapper_uses_adjacent_profiler_and_never_claude(self):
         text = self.read(BUNDLED_WRAPPER)
         self.assertIn("$PSScriptRoot", text)

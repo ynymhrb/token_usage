@@ -30,7 +30,55 @@ Use the package's exact values and units. Never fabricate a missing identifier o
 timestamp; call out the missing field in `Uncertainties` and cite the narrower
 window/session/metric evidence that is actually present.
 
-## Output shape
+## Fixed output template
+
+Write in Chinese and use exactly these six top-level headings in this order. Do
+not rename, merge, omit, or add top-level headings. Do not output any content
+before the first heading or after the completion marker.
+
+```markdown
+# Claude Usage 分析
+
+## 1. 脚本原始输出
+
+```text
+<SCRIPT_STDOUT 的完整报告正文；只删除 LLM package written 临时路径行>
+```
+
+## 2. 核心结论
+
+- <3–6 条最重要结论，每条给出数值证据引用>
+
+## 3. 消耗证据
+
+| 观察项 | 脚本数据 | 判断 |
+|---|---:|---|
+| <上下文/会话/轮次/缓存/Thinking/额度事件> | <原值> | <事实或估算标签> |
+
+## 4. 原因分析
+
+1. **<原因>**：<证据支持的推断与置信度；引用 session/turn/time/metric>。
+
+## 5. 改进建议
+
+1. **<优先级与动作>**：<说明它针对哪条证据，以及预期改善什么>。
+
+## 6. 局限与不确定性
+
+- <逐条列出 data_gaps、边界置信度、估算与不可观测项>
+
+<!-- USAGE_ANALYZE_COMPLETE -->
+```
+
+“分析”不能只是复述总量。至少比较会话贡献、主轮次贡献、上下文分布、
+cache read/write、LARGE_CACHE_CREATION、Thinking 估算和额度事件中实际存在的
+项目，并指出主要驱动项、时间邻近关系和可采取动作。没有证据时明确写
+“脚本数据不足以判断”，不得填充泛化建议。
+
+The parent conversation must display this entire block verbatim. It must not
+compress the result into a “quick summary” or append unrelated pending work.
+
+## Section semantics
 
 ### Facts
 

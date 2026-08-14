@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.superpowers/
+
+# Generated profiler outputs
+contract.json
+llm-package.json
+llm-package.md
+report-cache-classification.json
+report-*-v*.json

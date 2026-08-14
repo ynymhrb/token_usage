@@ -156,6 +156,23 @@ class ReportContractTests(unittest.TestCase):
         self.assertNotIn("full-request-id", json.dumps(package))
         self.assertNotIn("raw user text", json.dumps(package))
 
+    def test_llm_package_sanitizes_limit_incident_raw_transcript_text(self):
+        legacy = self.sample_legacy_report()
+        legacy["limit_events"] = [{
+            "kind": "five_hour_limit",
+            "time": "2026-08-13 22:40:36 +0800",
+            "session_id": "session-1",
+            "attempts": 2,
+            "raw": "PRIVATE_TRANSCRIPT_TEXT five hour limit PRIVATE_TRANSCRIPT_TEXT",
+        }]
+
+        package = profiler.build_llm_package(profiler.build_report_contract(legacy))
+        serialized = json.dumps(package)
+
+        self.assertNotIn("PRIVATE_TRANSCRIPT_TEXT", serialized)
+        self.assertNotIn('"raw"', serialized)
+        self.assertEqual(package["limit_incidents"][0]["attempts"], 2)
+
     def test_single_session_shape_is_normalized_and_package_strips_transcript_details(self):
         legacy = {
             "profiler_version": "2.6.0", "session_id": "main-session-id",

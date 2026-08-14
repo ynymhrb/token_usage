@@ -1,4 +1,4 @@
-# Claude Code Session Token Profiler v2.6.0
+# Claude Code Session Token Profiler v3.0.0
 #!/usr/bin/env python3
 """
 Claude Code session token profiler.
@@ -2227,6 +2227,16 @@ def build_llm_package(report: Dict[str, Any]) -> Dict[str, Any]:
         }
         for model, processed in model_processed.items()
     } if isinstance(model_processed, dict) else {}
+    limit_incident_fields = {
+        "kind", "type", "time", "timestamp", "last_time", "reset", "start", "end",
+        "window", "session_id", "source", "confidence", "attempts", "status",
+        "status_code", "used_percentage",
+    }
+    compact_limit_incidents = [
+        {key: incident.get(key) for key in limit_incident_fields if key in incident}
+        for incident in facts.get("limit_incidents", [])
+        if isinstance(incident, dict)
+    ]
     return {
         "schema_version": "1.0",
         "account_window": facts.get("account_five_hour_window") or facts.get("period") or facts.get("session_time_range"),
@@ -2235,7 +2245,7 @@ def build_llm_package(report: Dict[str, Any]) -> Dict[str, Any]:
         "sessions": compact_sessions,
         "cache_flags": cache_flags,
         "large_cache_creation_evidence": compact_calls,
-        "limit_incidents": facts.get("limit_incidents", []),
+        "limit_incidents": compact_limit_incidents,
         "estimates": report.get("estimates", {}),
         "data_gaps": report.get("data_gaps", []),
         "interpretation_constraints": {

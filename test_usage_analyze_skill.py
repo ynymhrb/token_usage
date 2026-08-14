@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -14,6 +15,7 @@ OPENAI_YAML = SKILL / "agents" / "openai.yaml"
 BUNDLED_PROFILER = SKILL / "scripts" / "claude_session_token_profiler.py"
 BUNDLED_WRAPPER = SKILL / "scripts" / "usage-analyze.ps1"
 ANALYSIS_CONTRACT = SKILL / "references" / "analysis-contract.md"
+ROUTER = SKILL / "scripts" / "route_usage_analyze.py"
 ROOT_PROFILER = ROOT / "claude_session_token_profiler.py"
 
 
@@ -29,6 +31,7 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
             BUNDLED_PROFILER,
             BUNDLED_WRAPPER,
             ANALYSIS_CONTRACT,
+            ROUTER,
         ):
             self.assertTrue(path.is_file(), f"required Skill file missing: {path}")
 
@@ -58,7 +61,7 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
             "read only that package",
             "--current-five-hour",
             "natural language",
-            "state the mapping",
+            "display_mapping",
             "Never read raw transcripts",
             "Never equate processed input with quota deduction",
             "Facts",
@@ -76,6 +79,33 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
         self.assertRegex(text, r"(?is)--llm.*--llm-package.*read only that package")
         self.assertRegex(text, r"(?is)recommendations.*LLM-owned.*not profiler facts")
 
+    def test_router_defaults_and_raw_mapping_contract(self):
+        spec = importlib.util.spec_from_file_location("usage_analyze_router", ROUTER)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        self.assertEqual(module.route(["--llm"])["profiler_args"], ["--current-five-hour"])
+        self.assertEqual(
+            module.route(["--llm", "--lang", "en"])["profiler_args"],
+            ["--lang", "en", "--current-five-hour"],
+        )
+        raw = module.route(["--raw", "最近一次"])
+        self.assertEqual(raw["profiler_args"], ["--current-five-hour"])
+        self.assertFalse(raw["display_mapping"])
+        analyzed = module.route(["最近6小时"])
+        self.assertEqual(analyzed["profiler_args"], ["--last-hours", "6"])
+        self.assertTrue(analyzed["display_mapping"])
+        with self.assertRaises(module.RouteError):
+            module.route(["--llm", "随便分析一下"])
+
+    def test_skill_requires_unconditional_cleanup_and_exact_raw_output(self):
+        text = self.read(SKILL_MD)
+        self.assertIn("try/finally", text)
+        self.assertIn("on success or failure", text)
+        self.assertIn("without revealing the temporary path", text)
+        self.assertRegex(text, r"(?is)mode: raw.*stdout verbatim.*no prefix.*time mapping")
+
     def test_bundled_wrapper_uses_adjacent_profiler_and_never_claude(self):
         text = self.read(BUNDLED_WRAPPER)
         self.assertIn("$PSScriptRoot", text)
@@ -87,6 +117,7 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
     def test_root_and_bundled_profiler_are_identical_version_3(self):
         self.assertEqual(ROOT_PROFILER.read_bytes(), BUNDLED_PROFILER.read_bytes())
         text = self.read(ROOT_PROFILER)
+        self.assertTrue(text.startswith("# Claude Code Session Token Profiler v3.0.0"))
         self.assertRegex(text, r'(?m)^__version__\s*=\s*"3\.0\.0"$')
 
     def test_analysis_reference_defines_classes_evidence_and_gaps(self):

@@ -75,8 +75,8 @@ cache read/write、LARGE_CACHE_CREATION、Thinking 估算和额度事件中实�
 项目，并指出主要驱动项、时间邻近关系和可采取动作。没有证据时明确写
 “脚本数据不足以判断”，不得填充泛化建议。
 
-The parent conversation must display this entire block verbatim. It must not
-compress the result into a “quick summary” or append unrelated pending work.
+Display this entire block directly in the current conversation. Do not compress
+it into a “quick summary” or append unrelated pending work.
 
 ## Section semantics
 

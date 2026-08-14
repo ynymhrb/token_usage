@@ -35,18 +35,18 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
         ):
             self.assertTrue(path.is_file(), f"required Skill file missing: {path}")
 
-    def test_claude_frontmatter_enforces_explicit_isolated_invocation(self):
+    def test_claude_frontmatter_enforces_explicit_inline_invocation(self):
         text = self.read(SKILL_MD)
         frontmatter = text.split("---", 2)[1]
         expected = {
             "name": "usage-analyze",
-            "context": "fork",
             "disable-model-invocation": "true",
             "argument-hint": '"[--raw|--llm] [time range or description]"',
             "shell": "powershell",
         }
         for key, value in expected.items():
             self.assertRegex(frontmatter, rf"(?m)^{re.escape(key)}:\s*{re.escape(value)}\s*$")
+        self.assertNotRegex(frontmatter, r"(?m)^context:\s*fork\s*$")
 
     def test_skill_defines_every_routing_mode_and_safety_boundary(self):
         text = self.read(SKILL_MD)
@@ -113,7 +113,7 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
             "SCRIPT_STDOUT",
             "complete profiler report",
             "parent conversation's project",
-            "relay the entire result verbatim",
+            "complete user-facing answer in the current conversation",
             "<!-- USAGE_ANALYZE_COMPLETE -->",
         ):
             self.assertIn(phrase, skill)

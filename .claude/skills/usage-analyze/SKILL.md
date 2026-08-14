@@ -1,7 +1,6 @@
 ---
 name: usage-analyze
 description: Analyze local Claude Code token usage for an explicit five-hour window or natural-language time request. Use only when the user explicitly invokes /usage-analyze to request a raw profiler report or an evidence-backed LLM interpretation of local usage.
-context: fork
 disable-model-invocation: true
 argument-hint: "[--raw|--llm] [time range or description]"
 shell: powershell
@@ -65,10 +64,10 @@ parent conversation's project, pending work, questions, git status, reminders,
 hooks, recaps, or any topic absent from the compact package and `SCRIPT_STDOUT`.
 Do not add greetings, process narration, “no action needed”, or follow-up prompts.
 
-Your final subagent result is the complete user-facing answer. End it with the
-literal marker `<!-- USAGE_ANALYZE_COMPLETE -->`. The parent agent receiving the
-background task result must relay the entire result verbatim and output nothing
-else: no summary, preface, recap, continuation of prior work, or commentary.
+Your result is the complete user-facing answer in the current conversation. End
+it with the literal marker `<!-- USAGE_ANALYZE_COMPLETE -->`. Output the fixed
+report directly and output nothing else: no summary, preface, recap,
+continuation of prior work, or commentary.
 
 If package creation or interpretation fails, return the factual error without a
 temporary path and without inventing evidence. The `finally` cleanup is mandatory

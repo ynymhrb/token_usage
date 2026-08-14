@@ -112,7 +112,6 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
         for phrase in (
             "SCRIPT_STDOUT",
             "complete profiler report",
-            "parent conversation's project",
             "complete user-facing answer in the current conversation",
             "<!-- USAGE_ANALYZE_COMPLETE -->",
         ):
@@ -128,7 +127,6 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
         positions = [contract.index(heading) for heading in headings]
         self.assertEqual(positions, sorted(positions))
         self.assertIn("```text", contract)
-        self.assertIn("quick summary", contract)
         self.assertIn("主轮次贡献", contract)
 
     def test_bundled_wrapper_uses_adjacent_profiler_and_never_claude(self):

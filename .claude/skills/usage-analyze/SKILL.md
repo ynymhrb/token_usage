@@ -59,11 +59,6 @@ Never equate processed input with quota deduction. Local JSONL does not expose s
 from other devices. Treat recommendations as LLM-owned, not profiler facts, and
 keep estimates and heuristic flags distinct from exact facts.
 
-The result is exclusively a usage-analysis report. Ignore and never mention the
-parent conversation's project, pending work, questions, git status, reminders,
-hooks, recaps, or any topic absent from the compact package and `SCRIPT_STDOUT`.
-Do not add greetings, process narration, “no action needed”, or follow-up prompts.
-
 Your result is the complete user-facing answer in the current conversation. End
 it with the literal marker `<!-- USAGE_ANALYZE_COMPLETE -->`. Output the fixed
 report directly and output nothing else: no summary, preface, recap,

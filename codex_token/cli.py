@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -14,7 +13,7 @@ from .adapter import discover_rollouts, parse_rollout
 from .detectors import detect
 from .recommendations import recommend
 from .report import build_report, render_markdown_report, write_json_report
-from .experiments import RunResult, _authorized_command_runner, compare_runs, execute_manifest, load_manifest, plan_manifest
+from .experiments import RunResult, compare_runs, load_manifest, plan_manifest
 
 
 def _finding_dict(finding: object) -> dict[str, object]:
@@ -75,17 +74,6 @@ def _experiment_run(args: argparse.Namespace) -> int:
     # 首版没有随清单版本化的模型价格表；不能把 Token 上限伪装为美元上限。
     print("当前清单没有匹配的价格表，无法安全执行美元预算实验。", file=sys.stderr)
     return 2
-    try:
-        manifest = load_manifest(Path(args.manifest))
-        results = execute_manifest(manifest, execute=True, token_budget=manifest.token_budget, runner=_authorized_command_runner())
-    except (ValueError, OSError, subprocess.SubprocessError) as error:
-        print(f"实验未启动或未完成：{type(error).__name__}", file=sys.stderr)
-        return 2
-    baseline = [result for result in results if result.variant == "baseline"]
-    candidate = [result for result in results if result.variant == "candidate"]
-    comparison = compare_runs(baseline, candidate, manifest.primary_metric) if baseline and candidate else None
-    print(json.dumps({"runs": [result.__dict__ for result in results], "comparison": comparison.__dict__ if comparison else None}, ensure_ascii=False, indent=2))
-    return 0
 
 
 def _compare(args: argparse.Namespace) -> int:

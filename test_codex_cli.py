@@ -42,6 +42,12 @@ class CodexCliTests(unittest.TestCase):
             code = main(["experiment", "run", "experiments/token-optimization-v1.json", "--budget-usd", "1"])
         self.assertEqual(code, 2)
 
+    def test_experiment_run_refuses_unpriced_dollar_budget_before_starting_process(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = main(["experiment", "run", "experiments/token-optimization-v1.json", "--execute", "--budget-usd", "1"])
+        self.assertEqual(code, 2)
+
     def test_compare_emits_quality_regression_from_saved_runs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

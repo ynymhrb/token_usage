@@ -69,6 +69,12 @@ def _experiment_run(args: argparse.Namespace) -> int:
     if not args.execute:
         print("真实执行需要显式 --execute；当前仅允许 experiment plan。", file=sys.stderr)
         return 2
+    if args.budget_usd <= 0:
+        print("--budget-usd 必须为正数。", file=sys.stderr)
+        return 2
+    # 首版没有随清单版本化的模型价格表；不能把 Token 上限伪装为美元上限。
+    print("当前清单没有匹配的价格表，无法安全执行美元预算实验。", file=sys.stderr)
+    return 2
     try:
         manifest = load_manifest(Path(args.manifest))
         results = execute_manifest(manifest, execute=True, token_budget=manifest.token_budget, runner=CommandRunner())

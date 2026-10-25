@@ -1,0 +1,45 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from codex_token.adapter import parse_rollout
+from codex_token.report import build_report, render_markdown_report, write_json_report
+
+
+FIXTURE = Path(__file__).parent / "tests" / "fixtures" / "codex" / "rollout-valid.jsonl"
+
+
+class CodexReportTests(unittest.TestCase):
+    def test_report_separates_evidence_classes_and_redacts_payloads(self):
+        report = build_report([parse_rollout(FIXTURE, identifier_salt="test")], [])
+        rendered = json.dumps(report, ensure_ascii=False)
+
+        self.assertEqual(
+            tuple(report),
+            ("facts", "derived_metrics", "estimates", "recommendations", "data_gaps"),
+        )
+        self.assertNotIn("private event payload", rendered)
+        self.assertNotIn("private tool input", rendered)
+
+    def test_unpriced_model_and_empty_input_are_explicit_gaps(self):
+        report = build_report([parse_rollout(FIXTURE, identifier_salt="test")], [])
+        empty = build_report([], [])
+
+        self.assertEqual(report["estimates"], [])
+        self.assertIn("unpriced_model", {gap["code"] for gap in report["data_gaps"]})
+        self.assertIn("no_traces", {gap["code"] for gap in empty["data_gaps"]})
+
+    def test_json_and_markdown_writers_keep_only_report_data(self):
+        report = build_report([parse_rollout(FIXTURE, identifier_salt="test")], [])
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "report.json"
+            write_json_report(target, report)
+            content = target.read_text(encoding="utf-8")
+
+        self.assertEqual(json.loads(content), report)
+        self.assertIn("# Codex Token 证据报告", render_markdown_report(report))
+
+
+if __name__ == "__main__":
+    unittest.main()

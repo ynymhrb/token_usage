@@ -40,12 +40,16 @@ def build_report(traces: Sequence[RunTrace], findings: Sequence[Finding]) -> dic
     """构建固定五区段报告，不接受也不回显原始转录内容。"""
     unique_traces: list[RunTrace] = []
     seen_signatures: set[tuple[object, ...]] = set()
+    by_trace_id: dict[str, RunTrace] = {}
     for trace in traces:
         signature = _trace_signature(trace)
         if signature and signature in seen_signatures:
             continue
         seen_signatures.add(signature)
-        unique_traces.append(trace)
+        previous = by_trace_id.get(trace.trace_id)
+        if previous is None or len(trace.events) > len(previous.events):
+            by_trace_id[trace.trace_id] = trace
+    unique_traces = list(by_trace_id.values())
     gaps = [asdict(gap) for trace in unique_traces for gap in trace.data_gaps]
     safe_gaps = [
         {**gap, "confidence": gap["confidence"].value, "evidence_lines": list(gap["evidence_lines"])}
@@ -77,8 +81,18 @@ def build_report(traces: Sequence[RunTrace], findings: Sequence[Finding]) -> dic
         ],
         "findings": [_finding(finding) for finding in findings if finding.evidence_kind.value == "fact"],
     }
-    known_input = [trace.token_usage.input_tokens for trace in unique_traces if trace.token_usage.input_tokens is not None]
-    known_total = [trace.token_usage.total_tokens for trace in unique_traces if trace.token_usage.total_tokens is not None]
+    seen_usage_events: set[tuple[object, ...]] = set()
+    usage_events = []
+    for trace in traces:
+        for event in trace.events:
+            if event.event_kind != "token_usage_record" or event.usage is None:
+                continue
+            key = (event.session_id, event.timestamp, event.turn_id, event.usage)
+            if key not in seen_usage_events:
+                seen_usage_events.add(key)
+                usage_events.append(event.usage)
+    known_input = [usage.input_tokens for usage in usage_events if usage.input_tokens is not None]
+    known_total = [usage.total_tokens for usage in usage_events if usage.total_tokens is not None]
     derived_metrics = {
         "known_input_tokens": sum(known_input) if known_input else None,
         "known_total_tokens": sum(known_total) if known_total else None,

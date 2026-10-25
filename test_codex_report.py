@@ -53,6 +53,18 @@ class CodexReportTests(unittest.TestCase):
         self.assertEqual(report["derived_metrics"]["known_input_tokens"], 120)
         self.assertEqual(report["facts"]["trace_count"], 1)
 
+    def test_report_does_not_double_count_prefix_of_appended_rollout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            records = FIXTURE.read_text(encoding="utf-8").splitlines()
+            first = root / "prefix.jsonl"
+            second = root / "extended.jsonl"
+            first.write_text("\n".join(records[:5]) + "\n", encoding="utf-8")
+            second.write_text("\n".join(records[:5] + ['{"type":"token_usage_record","timestamp":"2026-10-25T10:01:00+00:00","payload":{"input_tokens":30,"output_tokens":5,"total_tokens":35}}']) + "\n", encoding="utf-8")
+            report = build_report([parse_rollout(first, identifier_salt="test"), parse_rollout(second, identifier_salt="test")], [])
+        self.assertEqual(report["derived_metrics"]["known_input_tokens"], 150)
+        self.assertEqual(report["facts"]["trace_count"], 1)
+
     def test_json_and_markdown_writers_keep_only_report_data(self):
         report = build_report([parse_rollout(FIXTURE, identifier_salt="test")], [])
         with tempfile.TemporaryDirectory() as temporary:

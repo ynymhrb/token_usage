@@ -107,6 +107,9 @@ def compare_runs(baseline: Sequence[RunResult], candidate: Sequence[RunResult], 
 
 class CommandRunner:
     """真实执行器；只有显式执行门放行后才会被调用。"""
+    def __init__(self, capability: object | None = None) -> None:
+        self._capability = capability
+
     def is_git_repository(self, root: Path) -> bool:
         completed = subprocess.run(["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, check=False)
         return completed.returncode == 0 and completed.stdout.strip() == "true"
@@ -174,6 +177,4 @@ def execute_manifest(manifest: ExperimentManifest, *, execute: bool, token_budge
                 finally:
                     runner.remove_worktree(root, worktree)
     return results
-    def __init__(self, capability: object | None = None) -> None:
-        self._capability = capability
 

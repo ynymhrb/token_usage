@@ -1,0 +1,8 @@
+{"type":"session_meta","timestamp":"2026-10-25T10:00:00+00:00","payload":{"id":"fixture-session","cwd":"D:/repo","model":"gpt-test"}}
+{"type":"turn_context","timestamp":"2026-10-25T10:00:01+00:00","payload":{"turn_id":"turn-1"}}
+{"type":"event_msg","timestamp":"2026-10-25T10:00:02+00:00","payload":{"message":"private event payload"}}
+{"type":"response_item","timestamp":"2026-10-25T10:00:03+00:00","payload":{"type":"function_call","name":"read_file","arguments":"private tool input"}}
+{"type":"token_usage_record","timestamp":"2026-10-25T10:00:04+00:00","payload":{"input_tokens":120,"output_tokens":20,"total_tokens":140}}
+{"type":"token_usage_record","timestamp":"2026-10-25T10:00:04+00:00","payload":{"input_tokens":120,"output_tokens":20,"total_tokens":140}}
+{"type":"future_event","payload":{"secret":"do-not-store"}}
+{not json

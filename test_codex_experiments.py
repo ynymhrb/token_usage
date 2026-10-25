@@ -31,6 +31,16 @@ class ExperimentTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_manifest(path)
 
+    def test_manifest_rejects_invalid_scalar_types_without_crashing_cli(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "manifest.json"
+            path.write_text(json.dumps({
+                "baseline_commit": "abc", "repository_root": ".", "tasks": [{"id": "x", "prompt": "p", "verify": "python"}],
+                "candidate": {"kind": "narrow_prompt"}, "repetitions": None, "primary_metric": "input_tokens", "token_budget": -1,
+            }), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_manifest(path)
+
     def test_plan_is_data_only(self):
         manifest = ExperimentManifest("abc", Path("."), ({"id": "unit", "prompt": "测试", "verify": "python -m unittest"},), {"kind": "narrow_prompt"}, 3, "input_tokens", 100)
         self.assertFalse(plan_manifest(manifest)["execute"])

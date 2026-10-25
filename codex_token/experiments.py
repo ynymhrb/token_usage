@@ -49,7 +49,12 @@ def load_manifest(path: Path) -> ExperimentManifest:
     required = {"baseline_commit", "repository_root", "tasks", "candidate", "repetitions", "primary_metric", "token_budget"}
     if not isinstance(data, dict) or (missing := required - data.keys()):
         raise ValueError("实验清单缺少必需字段")
-    if data["repetitions"] < 3 or not data["tasks"] or data["primary_metric"] not in {"input_tokens", "total_tokens", "wall_seconds"}:
+    repetitions = data["repetitions"]
+    budget = data["token_budget"]
+    if (not isinstance(repetitions, int) or isinstance(repetitions, bool) or repetitions < 3
+            or not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0
+            or not isinstance(data["tasks"], list)
+            or data["primary_metric"] not in {"input_tokens", "total_tokens", "wall_seconds"}):
         raise ValueError("实验清单的重复次数、任务或主指标无效")
     candidate = data["candidate"]
     if not isinstance(candidate, dict) or candidate.get("kind") not in {"narrow_prompt", "limit_tool_output", "summarize_completed", "disable_unused_tool"}:
@@ -57,7 +62,9 @@ def load_manifest(path: Path) -> ExperimentManifest:
     tasks = tuple(task for task in data["tasks"] if isinstance(task, dict) and all(key in task for key in ("id", "prompt", "verify")))
     if len(tasks) != len(data["tasks"]):
         raise ValueError("每个任务必须含 id、prompt 与 verify")
-    return ExperimentManifest(str(data["baseline_commit"]), Path(data["repository_root"]), tasks, candidate, int(data["repetitions"]), str(data["primary_metric"]), int(data["token_budget"]))
+    if not isinstance(data["baseline_commit"], str) or not data["baseline_commit"].strip() or not isinstance(data["repository_root"], str) or not data["repository_root"].strip():
+        raise ValueError("基线提交和仓库根目录必须是非空字符串")
+    return ExperimentManifest(data["baseline_commit"], Path(data["repository_root"]), tasks, candidate, repetitions, str(data["primary_metric"]), budget)
 
 
 def plan_manifest(manifest: ExperimentManifest) -> dict[str, object]:

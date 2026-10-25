@@ -30,6 +30,14 @@ class CodexReportTests(unittest.TestCase):
         self.assertIn("unpriced_model", {gap["code"] for gap in report["data_gaps"]})
         self.assertIn("no_traces", {gap["code"] for gap in empty["data_gaps"]})
 
+    def test_report_never_exposes_untrusted_model_or_tool_names(self):
+        fixture = FIXTURE.read_text(encoding="utf-8").replace("gpt-test", "model-secret-key").replace("read_file", "tool-secret-key")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "rollout.jsonl"
+            path.write_text(fixture, encoding="utf-8")
+            report = build_report([parse_rollout(path, identifier_salt="test")], [])
+        self.assertNotIn("secret-key", json.dumps(report))
+
     def test_json_and_markdown_writers_keep_only_report_data(self):
         report = build_report([parse_rollout(FIXTURE, identifier_salt="test")], [])
         with tempfile.TemporaryDirectory() as temporary:

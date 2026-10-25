@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import asdict
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -36,17 +37,18 @@ def build_report(traces: Sequence[RunTrace], findings: Sequence[Finding]) -> dic
     if not traces:
         safe_gaps.append(_gap("no_traces", "没有可分析的 rollout"))
     models = sorted({trace.model for trace in traces if trace.model})
+    model_labels = {model: f"model_{hashlib.sha256(model.encode('utf-8')).hexdigest()[:12]}" for model in models}
     if models:
-        safe_gaps.extend(_gap("unpriced_model", f"模型 {model} 没有匹配的价格表") for model in models)
+        safe_gaps.extend(_gap("unpriced_model", "模型没有匹配的价格表") for model in models)
 
     facts = {
         "trace_count": len(traces),
-        "models": models,
+        "model_count": len(models),
         "traces": [
             {
                 "trace_id": trace.trace_id,
                 "event_count": len(trace.events),
-                "model": trace.model,
+                "model": model_labels.get(trace.model) if trace.model else None,
                 "token_usage": {
                     "input_tokens": trace.token_usage.input_tokens,
                     "output_tokens": trace.token_usage.output_tokens,

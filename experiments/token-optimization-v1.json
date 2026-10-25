@@ -1,0 +1,9 @@
+{
+  "baseline_commit": "PLACEHOLDER",
+  "repository_root": ".",
+  "tasks": [{"id": "full-tests", "prompt": "运行固定测试并报告结果", "verify": "python -m unittest discover -v"}],
+  "candidate": {"kind": "narrow_prompt"},
+  "repetitions": 3,
+  "primary_metric": "input_tokens",
+  "token_budget": 100000
+}

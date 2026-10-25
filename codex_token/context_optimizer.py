@@ -32,8 +32,9 @@ class ContextOptimizer:
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
         storage_name = f"{source}-{digest}.txt"
         self._data_dir.mkdir(parents=True, exist_ok=True)
+        receipt_path = self._data_dir / f"{digest}.receipt.json"
+        duplicate = digest in self._seen or receipt_path.exists()
         (self._data_dir / storage_name).write_text(text, encoding="utf-8")
-        duplicate = digest in self._seen
         if duplicate:
             result = OptimizedResult(f"重复结果已省略：{digest}；原始长度 {len(text)} 字符。", storage_name, len(text), True, True)
             self._write_receipt(source, digest, result, failed)

@@ -1,4 +1,8 @@
 import json
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,6 +28,29 @@ class PluginPackageTests(unittest.TestCase):
     def test_controlled_mcp_tools_require_approval(self):
         config = Path(".codex/config.toml").read_text(encoding="utf-8")
         self.assertIn('default_tools_approval_mode = "prompt"', config)
+
+    def test_self_contained_runtime_suppresses_duplicate_after_restart(self):
+        root = Path("codex-context-optimizer")
+        script = root / "scripts" / "mcp_server.py"
+        request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "sample.txt"}}}) + "\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            Path(temporary, "sample.txt").write_text("same output", encoding="utf-8")
+            environment = os.environ | {"PLUGIN_DATA": str(Path(temporary, "data"))}
+            first = subprocess.run([sys.executable, str(script.resolve())], input=request, text=True, capture_output=True, cwd=temporary, env=environment, check=True)
+            second = subprocess.run([sys.executable, str(script.resolve())], input=request, text=True, capture_output=True, cwd=temporary, env=environment, check=True)
+        self.assertIn("same output", json.loads(first.stdout)["result"]["content"][0]["text"])
+        self.assertIn("重复结果已省略", json.loads(second.stdout)["result"]["content"][0]["text"])
+
+    def test_pre_compact_hook_reports_receipt_counts_without_raw_output(self):
+        script = Path("codex-context-optimizer/hooks/pre_compact.py").resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            data = Path(temporary, "data")
+            data.mkdir()
+            Path(data, "abc.receipt.json").write_text(json.dumps({"original_chars": 5000, "compressed": True, "duplicate": False}), encoding="utf-8")
+            completed = subprocess.run([sys.executable, str(script)], input=json.dumps({"session_id": "test-session"}), text=True, capture_output=True, cwd=temporary, env=(os.environ | {"PLUGIN_DATA": str(data)}), check=True)
+        additional_context = json.loads(completed.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("受控工具记录：1 次，压缩 1 次，重复省略 0 次，原始输出合计 5000 字符", additional_context)
+        self.assertNotIn("API_KEY", additional_context)
 
 
 if __name__ == "__main__":

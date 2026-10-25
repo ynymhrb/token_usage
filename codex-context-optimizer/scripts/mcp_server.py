@@ -16,12 +16,20 @@ def redact(text):
 def output(text, data, source, failed=False):
     digest = hashlib.sha256(text.encode()).hexdigest()[:16]
     data.mkdir(parents=True, exist_ok=True)
-    (data / f"{source}-{digest}.txt").write_text(text, encoding="utf-8")
-    visible = redact(text)
-    if len(visible) > 4000:
+    storage_name = f"{source}-{digest}.txt"
+    receipt_path = data / f"{digest}.receipt.json"
+    duplicate = receipt_path.exists()
+    (data / storage_name).write_text(text, encoding="utf-8")
+    if duplicate:
+        visible = f"重复结果已省略：{digest}；原始长度 {len(text)} 字符。"
+    else:
+        visible = redact(text)
+    compressed = duplicate or len(text) > 4000
+    if not duplicate and len(visible) > 4000:
         errors = [redact(line) for line in text.splitlines() if "error" in line.lower() or "failed" in line.lower()]
-        visible = f"结果已压缩：原始长度 {len(text)} 字符，完整结果标签 {digest}。" + (f"\n关键错误：{errors[0]}" if failed and errors else "")
-    (data / f"{digest}.receipt.json").write_text(json.dumps({"source": source, "content_id": digest, "original_chars": len(text), "compressed": len(text) > 4000, "failed": failed}, ensure_ascii=False), encoding="utf-8")
+        visible = f"结果已压缩：原始长度 {len(text)} 字符，完整结果保存为 {storage_name}。" + (f"\n关键错误：{errors[0]}" if failed and errors else "")
+    receipt = {"source": source, "content_id": digest, "original_chars": len(text), "compressed": compressed, "duplicate": duplicate, "failed": failed, "storage_name": storage_name}
+    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, sort_keys=True), encoding="utf-8")
     return {"content": [{"type": "text", "text": visible}], "isError": failed}
 
 
@@ -33,6 +41,7 @@ for line in sys.stdin:
         elif method == "tools/list": result = {"tools": [{"name": "run_command", "description": "运行参数数组命令并压缩输出", "inputSchema": {"type": "object"}}, {"name": "read_file", "description": "读取工作区文件并压缩内容", "inputSchema": {"type": "object"}}]}
         elif method == "tools/call" and params.get("name") == "run_command":
             command = params.get("arguments", {}).get("command", [])
+            if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command): raise ValueError("命令必须是非空字符串数组")
             run = subprocess.run(command, cwd=Path.cwd(), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, check=False)
             result = output(run.stdout + run.stderr, data, "command", run.returncode != 0)
         elif method == "tools/call" and params.get("name") == "read_file":

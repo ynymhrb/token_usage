@@ -39,6 +39,13 @@ class ContextOptimizerTests(unittest.TestCase):
         self.assertNotIn("same output", result.visible_text)
         self.assertIn("重复结果", result.visible_text)
 
+    def test_duplicate_result_survives_optimizer_restart(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ContextOptimizer(Path(temporary), max_chars=100).optimize("same output", source="command")
+            result = ContextOptimizer(Path(temporary), max_chars=100).optimize("same output", source="command")
+        self.assertTrue(result.duplicate)
+        self.assertNotIn("same output", result.visible_text)
+
     def test_short_secret_and_error_secret_are_redacted_from_model_output(self):
         with tempfile.TemporaryDirectory() as temporary:
             optimizer = ContextOptimizer(Path(temporary), max_chars=100)

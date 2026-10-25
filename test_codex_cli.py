@@ -36,6 +36,12 @@ class CodexCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(json.loads(output.getvalue())["execute"])
 
+    def test_experiment_run_requires_execute_without_starting_process(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = main(["experiment", "run", "experiments/token-optimization-v1.json", "--budget-usd", "1"])
+        self.assertEqual(code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

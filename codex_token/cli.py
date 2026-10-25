@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -13,7 +14,7 @@ from .adapter import discover_rollouts, parse_rollout
 from .detectors import detect
 from .recommendations import recommend
 from .report import build_report, render_markdown_report, write_json_report
-from .experiments import load_manifest, plan_manifest
+from .experiments import CommandRunner, execute_manifest, load_manifest, plan_manifest
 
 
 def _finding_dict(finding: object) -> dict[str, object]:
@@ -64,6 +65,20 @@ def _experiment_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _experiment_run(args: argparse.Namespace) -> int:
+    if not args.execute:
+        print("真实执行需要显式 --execute；当前仅允许 experiment plan。", file=sys.stderr)
+        return 2
+    try:
+        manifest = load_manifest(Path(args.manifest))
+        results = execute_manifest(manifest, execute=True, token_budget=manifest.token_budget, runner=CommandRunner())
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        print(f"实验未启动或未完成：{type(error).__name__}", file=sys.stderr)
+        return 2
+    print(json.dumps([result.__dict__ for result in results], ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codex-token", description="本地、脱敏的 Codex Token 诊断工具")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -80,6 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
     plan = experiment_commands.add_parser("plan", help="只生成实验计划，不执行")
     plan.add_argument("manifest")
     plan.set_defaults(handler=_experiment_plan)
+    run = experiment_commands.add_parser("run", help="仅在显式确认后运行受控实验")
+    run.add_argument("manifest")
+    run.add_argument("--execute", action="store_true")
+    run.add_argument("--budget-usd", type=float, required=True)
+    run.set_defaults(handler=_experiment_run)
     return parser
 
 

@@ -50,7 +50,14 @@ class FakeRunner:
     def is_git_repository(self, root):
         return True
 
-    def run_candidate(self, manifest, task):
+    def create_worktree(self, root, baseline_commit):
+        self.calls.append(("create", str(root), baseline_commit))
+        return Path("temporary-worktree")
+
+    def remove_worktree(self, root, worktree):
+        self.calls.append(("remove", str(worktree)))
+
+    def run_candidate(self, worktree, candidate, task):
         self.calls.append(task["id"])
         return self.results.pop(0)
 
@@ -62,13 +69,21 @@ class ExecutionGateTests(unittest.TestCase):
     def test_execute_manifest_stops_at_token_budget_without_a_second_run(self):
         runner = FakeRunner([RunResult(True, True, 120, 120, 1.0), RunResult(True, True, 120, 120, 1.0)])
         results = execute_manifest(self.manifest(), execute=True, token_budget=100, runner=runner)
-        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual([call for call in runner.calls if call == "unit"], ["unit"])
+        self.assertEqual(runner.calls[-1][0], "remove")
         self.assertEqual(results[0].stop_reason, "token_budget_reached")
 
     def test_missing_execute_never_invokes_runner(self):
         runner = FakeRunner([RunResult(True, True, 1, 1, 1.0)])
         self.assertEqual(execute_manifest(self.manifest(), execute=False, token_budget=100, runner=runner), [])
         self.assertEqual(runner.calls, [])
+
+    def test_consecutive_quality_failures_stop_and_remove_worktree(self):
+        runner = FakeRunner([RunResult(False, False, 1, 1, 1.0), RunResult(False, False, 1, 1, 1.0), RunResult(True, True, 1, 1, 1.0)])
+        results = execute_manifest(self.manifest(), execute=True, token_budget=100, runner=runner)
+        self.assertEqual(len([call for call in runner.calls if call == "unit"]), 2)
+        self.assertEqual(results[-1].stop_reason, "consecutive_quality_failures")
+        self.assertEqual(runner.calls[-1][0], "remove")
 
 
 if __name__ == "__main__":

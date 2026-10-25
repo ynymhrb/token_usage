@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -96,9 +97,21 @@ class CommandRunner:
         completed = subprocess.run(["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, check=False)
         return completed.returncode == 0 and completed.stdout.strip() == "true"
 
-    def run_candidate(self, manifest: ExperimentManifest, task: dict[str, str]) -> RunResult:
-        # 此方法由 execute_manifest 在临时 worktree 生命周期内调用。
-        raise RuntimeError("真实 Codex 执行需要由 CLI 的显式执行路径提供 worktree 上下文")
+    def create_worktree(self, root: Path, baseline_commit: str) -> Path:
+        path = Path(tempfile.mkdtemp(prefix="codex-token-experiment-"))
+        subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach", str(path), baseline_commit], check=True, capture_output=True, text=True)
+        return path
+
+    def remove_worktree(self, root: Path, worktree: Path) -> None:
+        subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(worktree)], check=False, capture_output=True, text=True)
+
+    def run_candidate(self, worktree: Path, candidate: dict[str, str], task: dict[str, str]) -> RunResult:
+        started = time.monotonic()
+        prompt = f"{task['prompt']}\n\n候选干预：{candidate['kind']}"
+        codex = subprocess.run(["codex", "exec", prompt], cwd=worktree, check=False, capture_output=True, text=True)
+        verify = subprocess.run(task["verify"].split(), cwd=worktree, check=False, capture_output=True, text=True)
+        passed = codex.returncode == 0
+        return RunResult(passed, verify.returncode == 0, None, None, time.monotonic() - started)
 
 
 def execute_manifest(manifest: ExperimentManifest, *, execute: bool, token_budget: int, runner: CommandRunner) -> list[RunResult]:
@@ -111,18 +124,22 @@ def execute_manifest(manifest: ExperimentManifest, *, execute: bool, token_budge
     results: list[RunResult] = []
     used_tokens = 0
     consecutive_quality_failures = 0
-    for _ in range(manifest.repetitions):
-        for task in manifest.tasks:
-            result = runner.run_candidate(manifest, task)
-            used_tokens += result.input_tokens or 0
-            if used_tokens >= token_budget:
-                result = RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "token_budget_reached")
+    worktree = runner.create_worktree(root, manifest.baseline_commit)
+    try:
+        for _ in range(manifest.repetitions):
+            for task in manifest.tasks:
+                result = runner.run_candidate(worktree, manifest.candidate, task)
+                used_tokens += result.input_tokens or 0
+                if used_tokens >= token_budget:
+                    result = RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "token_budget_reached")
+                    results.append(result)
+                    return results
+                consecutive_quality_failures = 0 if result.quality_passed else consecutive_quality_failures + 1
+                if consecutive_quality_failures >= 2:
+                    result = RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "consecutive_quality_failures")
+                    results.append(result)
+                    return results
                 results.append(result)
-                return results
-            consecutive_quality_failures = 0 if result.quality_passed else consecutive_quality_failures + 1
-            if consecutive_quality_failures >= 2:
-                result = RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "consecutive_quality_failures")
-                results.append(result)
-                return results
-            results.append(result)
+    finally:
+        runner.remove_worktree(root, worktree)
     return results

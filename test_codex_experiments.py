@@ -102,6 +102,14 @@ class ExecutionGateTests(unittest.TestCase):
         self.assertEqual(len([call for call in runner.calls if isinstance(call, tuple) and call[0] == "remove"]), 6)
         self.assertEqual({call[1] for call in runner.calls if isinstance(call, tuple) and call[0] == "run"}, {"baseline", "narrow_prompt"})
 
+    def test_results_are_labeled_and_can_be_compared_by_variant(self):
+        runner = FakeRunner([RunResult(True, True, 100, 100, 1.0), RunResult(True, True, 80, 80, 1.0)] * 3)
+        results = execute_manifest(self.manifest(), execute=True, token_budget=1000, runner=runner)
+        baseline = [result for result in results if result.variant == "baseline"]
+        candidate = [result for result in results if result.variant == "candidate"]
+        self.assertEqual((len(baseline), len(candidate)), (3, 3))
+        self.assertEqual(compare_runs(baseline, candidate).status, "effective")
+
     def test_unknown_token_usage_stops_before_a_second_paid_run(self):
         runner = FakeRunner([RunResult(True, True, None, None, 1.0), RunResult(True, True, 1, 1, 1.0)])
         results = execute_manifest(self.manifest(), execute=True, token_budget=100, runner=runner)

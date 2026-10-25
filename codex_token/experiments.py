@@ -6,7 +6,7 @@ import json
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Sequence
 
@@ -30,6 +30,7 @@ class RunResult:
     total_tokens: int | None
     wall_seconds: float | None
     stop_reason: str | None = None
+    variant: str = "candidate"
 
 
 @dataclass(frozen=True)
@@ -136,17 +137,17 @@ def execute_manifest(manifest: ExperimentManifest, *, execute: bool, token_budge
             for variant in ({"kind": "baseline"}, manifest.candidate):
                 worktree = runner.create_worktree(root, manifest.baseline_commit)
                 try:
-                    result = runner.run_candidate(worktree, variant, task)
+                    result = replace(runner.run_candidate(worktree, variant, task), variant=("baseline" if variant["kind"] == "baseline" else "candidate"))
                     if result.input_tokens is None:
-                        results.append(RunResult(result.task_passed, result.quality_passed, None, result.total_tokens, result.wall_seconds, "unknown_token_usage"))
+                        results.append(replace(result, stop_reason="unknown_token_usage"))
                         return results
                     used_tokens += result.input_tokens
                     if used_tokens >= token_budget:
-                        results.append(RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "token_budget_reached"))
+                        results.append(replace(result, stop_reason="token_budget_reached"))
                         return results
                     consecutive_quality_failures = 0 if result.quality_passed else consecutive_quality_failures + 1
                     if consecutive_quality_failures >= 2:
-                        results.append(RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "consecutive_quality_failures"))
+                        results.append(replace(result, stop_reason="consecutive_quality_failures"))
                         return results
                     results.append(result)
                 finally:

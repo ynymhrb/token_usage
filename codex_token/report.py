@@ -56,6 +56,7 @@ def build_report(traces: Sequence[RunTrace], findings: Sequence[Finding]) -> dic
             }
             for trace in traces
         ],
+        "findings": [_finding(finding) for finding in findings if finding.evidence_kind.value == "fact"],
     }
     known_input = [trace.token_usage.input_tokens for trace in traces if trace.token_usage.input_tokens is not None]
     known_total = [trace.token_usage.total_tokens for trace in traces if trace.token_usage.total_tokens is not None]

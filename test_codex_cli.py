@@ -29,6 +29,13 @@ class CodexCliTests(unittest.TestCase):
             code = main(["recommend", "tests/fixtures/codex/rollout-valid.jsonl"])
         self.assertNotEqual(code, 0)
 
+    def test_experiment_plan_is_read_only(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = main(["experiment", "plan", "experiments/token-optimization-v1.json"])
+        self.assertEqual(code, 0)
+        self.assertFalse(json.loads(output.getvalue())["execute"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -86,3 +88,41 @@ def compare_runs(baseline: Sequence[RunResult], candidate: Sequence[RunResult], 
     if len(candidate) < 3:
         return ComparisonResult("uncertain", base_quality, candidate_quality, change, "重复次数少于 3")
     return ComparisonResult("ineffective", base_quality, candidate_quality, change, "未达到预先声明的有效改善门槛")
+
+
+class CommandRunner:
+    """真实执行器；只有显式执行门放行后才会被调用。"""
+    def is_git_repository(self, root: Path) -> bool:
+        completed = subprocess.run(["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, check=False)
+        return completed.returncode == 0 and completed.stdout.strip() == "true"
+
+    def run_candidate(self, manifest: ExperimentManifest, task: dict[str, str]) -> RunResult:
+        # 此方法由 execute_manifest 在临时 worktree 生命周期内调用。
+        raise RuntimeError("真实 Codex 执行需要由 CLI 的显式执行路径提供 worktree 上下文")
+
+
+def execute_manifest(manifest: ExperimentManifest, *, execute: bool, token_budget: int, runner: CommandRunner) -> list[RunResult]:
+    """执行前检查预算和 Git 边界；未带 execute 时绝不产生子进程。"""
+    if not execute:
+        return []
+    root = manifest.repository_root.resolve()
+    if not runner.is_git_repository(root):
+        return [RunResult(False, False, None, None, None, "non_git_repository")]
+    results: list[RunResult] = []
+    used_tokens = 0
+    consecutive_quality_failures = 0
+    for _ in range(manifest.repetitions):
+        for task in manifest.tasks:
+            result = runner.run_candidate(manifest, task)
+            used_tokens += result.input_tokens or 0
+            if used_tokens >= token_budget:
+                result = RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "token_budget_reached")
+                results.append(result)
+                return results
+            consecutive_quality_failures = 0 if result.quality_passed else consecutive_quality_failures + 1
+            if consecutive_quality_failures >= 2:
+                result = RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "consecutive_quality_failures")
+                results.append(result)
+                return results
+            results.append(result)
+    return results

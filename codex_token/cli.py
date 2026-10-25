@@ -13,6 +13,7 @@ from .adapter import discover_rollouts, parse_rollout
 from .detectors import detect
 from .recommendations import recommend
 from .report import build_report, render_markdown_report, write_json_report
+from .experiments import load_manifest, plan_manifest
 
 
 def _finding_dict(finding: object) -> dict[str, object]:
@@ -54,6 +55,15 @@ def _recommend(args: argparse.Namespace) -> int:
     return 0
 
 
+def _experiment_plan(args: argparse.Namespace) -> int:
+    try:
+        print(json.dumps(plan_manifest(load_manifest(Path(args.manifest))), ensure_ascii=False, indent=2))
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codex-token", description="本地、脱敏的 Codex Token 诊断工具")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -65,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     recommend_parser = commands.add_parser("recommend", help="从脱敏报告生成建议")
     recommend_parser.add_argument("report")
     recommend_parser.set_defaults(handler=_recommend)
+    experiment = commands.add_parser("experiment", help="管理受控实验")
+    experiment_commands = experiment.add_subparsers(dest="experiment_command", required=True)
+    plan = experiment_commands.add_parser("plan", help="只生成实验计划，不执行")
+    plan.add_argument("manifest")
+    plan.set_defaults(handler=_experiment_plan)
     return parser
 
 

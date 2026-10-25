@@ -41,6 +41,15 @@ class ExperimentTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_manifest(path)
 
+    def test_manifest_rejects_unimplemented_candidate_and_requires_auditable_instruction(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "manifest.json"
+            base = {"baseline_commit": "abc", "repository_root": ".", "tasks": [{"id": "x", "prompt": "p", "verify": "python"}], "repetitions": 3, "primary_metric": "input_tokens", "token_budget": 1}
+            path.write_text(json.dumps({**base, "candidate": {"kind": "limit_tool_output"}}), encoding="utf-8")
+            with self.assertRaises(ValueError): load_manifest(path)
+            path.write_text(json.dumps({**base, "candidate": {"kind": "narrow_prompt"}}), encoding="utf-8")
+            with self.assertRaises(ValueError): load_manifest(path)
+
     def test_plan_is_data_only(self):
         manifest = ExperimentManifest("abc", Path("."), ({"id": "unit", "prompt": "测试", "verify": "python -m unittest"},), {"kind": "narrow_prompt"}, 3, "input_tokens", 100)
         self.assertFalse(plan_manifest(manifest)["execute"])

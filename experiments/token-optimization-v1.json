@@ -2,7 +2,7 @@
   "baseline_commit": "52bba4d81a2c88072e644ec645256e40c2b02482",
   "repository_root": ".",
   "tasks": [{"id": "full-tests", "prompt": "运行固定测试并报告结果", "verify": "python -m unittest discover -v"}],
-  "candidate": {"kind": "narrow_prompt"},
+  "candidate": {"kind": "narrow_prompt", "instruction": "仅完成指定任务；不要扩展范围。"},
   "repetitions": 3,
   "primary_metric": "input_tokens",
   "token_budget": 100000

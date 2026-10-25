@@ -61,8 +61,9 @@ def load_manifest(path: Path) -> ExperimentManifest:
             or data["primary_metric"] not in {"input_tokens", "total_tokens", "wall_seconds"}):
         raise ValueError("实验清单的重复次数、任务或主指标无效")
     candidate = data["candidate"]
-    if not isinstance(candidate, dict) or candidate.get("kind") not in {"narrow_prompt", "limit_tool_output", "summarize_completed", "disable_unused_tool"}:
-        raise ValueError("候选干预不在允许范围内")
+    if (not isinstance(candidate, dict) or candidate.get("kind") != "narrow_prompt"
+            or not isinstance(candidate.get("instruction"), str) or not candidate["instruction"].strip()):
+        raise ValueError("首版候选干预仅支持带非空 instruction 的 narrow_prompt")
     tasks = tuple(task for task in data["tasks"] if isinstance(task, dict) and all(key in task for key in ("id", "prompt", "verify")))
     if len(tasks) != len(data["tasks"]):
         raise ValueError("每个任务必须含 id、prompt 与 verify")
@@ -120,7 +121,7 @@ class CommandRunner:
         started = time.monotonic()
         sessions_root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "sessions"
         before = {path: path.stat().st_mtime_ns for path in discover_rollouts(sessions_root)}
-        prompt = f"{task['prompt']}\n\n候选干预：{candidate['kind']}"
+        prompt = task["prompt"] if candidate["kind"] == "baseline" else f"{candidate['instruction'].strip()}\n\n{task['prompt']}"
         codex = subprocess.run(["codex", "exec", prompt], cwd=worktree, check=False, capture_output=True, text=True)
         verify = subprocess.run(task["verify"].split(), cwd=worktree, check=False, capture_output=True, text=True)
         passed = codex.returncode == 0

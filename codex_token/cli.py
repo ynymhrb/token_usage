@@ -75,7 +75,10 @@ def _experiment_run(args: argparse.Namespace) -> int:
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f"实验未启动或未完成：{type(error).__name__}", file=sys.stderr)
         return 2
-    print(json.dumps([result.__dict__ for result in results], ensure_ascii=False, indent=2))
+    baseline = [result for result in results if result.variant == "baseline"]
+    candidate = [result for result in results if result.variant == "candidate"]
+    comparison = compare_runs(baseline, candidate, manifest.primary_metric) if baseline and candidate else None
+    print(json.dumps({"runs": [result.__dict__ for result in results], "comparison": comparison.__dict__ if comparison else None}, ensure_ascii=False, indent=2))
     return 0
 
 

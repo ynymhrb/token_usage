@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Sequence
+
+from .adapter import discover_rollouts, parse_rollout
 
 
 @dataclass(frozen=True)
@@ -115,11 +118,19 @@ class CommandRunner:
 
     def run_candidate(self, worktree: Path, candidate: dict[str, str], task: dict[str, str]) -> RunResult:
         started = time.monotonic()
+        sessions_root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "sessions"
+        before = {path: path.stat().st_mtime_ns for path in discover_rollouts(sessions_root)}
         prompt = f"{task['prompt']}\n\n候选干预：{candidate['kind']}"
         codex = subprocess.run(["codex", "exec", prompt], cwd=worktree, check=False, capture_output=True, text=True)
         verify = subprocess.run(task["verify"].split(), cwd=worktree, check=False, capture_output=True, text=True)
         passed = codex.returncode == 0
-        return RunResult(passed, verify.returncode == 0, None, None, time.monotonic() - started)
+        changed = [path for path in discover_rollouts(sessions_root) if before.get(path) != path.stat().st_mtime_ns]
+        traces = [parse_rollout(path, identifier_salt="experiment") for path in changed]
+        inputs = [trace.token_usage.input_tokens for trace in traces if trace.token_usage.input_tokens is not None]
+        totals = [trace.token_usage.total_tokens for trace in traces if trace.token_usage.total_tokens is not None]
+        input_tokens = sum(inputs) if inputs else None
+        total_tokens = sum(totals) if totals else None
+        return RunResult(passed, verify.returncode == 0, input_tokens, total_tokens, time.monotonic() - started)
 
 
 def execute_manifest(manifest: ExperimentManifest, *, execute: bool, token_budget: int, runner: CommandRunner) -> list[RunResult]:

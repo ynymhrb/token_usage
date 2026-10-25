@@ -14,6 +14,13 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("PreCompact", hooks["hooks"])
         self.assertIn("${PLUGIN_ROOT}", hooks["hooks"]["PreCompact"][0]["hooks"][0]["command"])
 
+    def test_repo_marketplace_exposes_the_plugin(self):
+        marketplace = json.loads(Path(".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
+        plugin = marketplace["plugins"][0]
+        self.assertEqual(marketplace["name"], "token-usage-local")
+        self.assertEqual(plugin["name"], "codex-context-optimizer")
+        self.assertEqual(plugin["source"]["path"], "./codex-context-optimizer")
+
 
 if __name__ == "__main__":
     unittest.main()

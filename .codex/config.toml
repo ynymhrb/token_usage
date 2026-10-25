@@ -1,0 +1,2 @@
+[plugins."codex-context-optimizer@token-usage-local"]
+enabled = true

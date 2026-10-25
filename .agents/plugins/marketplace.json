@@ -1,0 +1,20 @@
+{
+  "name": "token-usage-local",
+  "interface": {
+    "displayName": "Token Usage 本地插件"
+  },
+  "plugins": [
+    {
+      "name": "codex-context-optimizer",
+      "source": {
+        "source": "local",
+        "path": "./codex-context-optimizer"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

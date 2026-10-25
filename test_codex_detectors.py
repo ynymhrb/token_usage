@@ -25,7 +25,7 @@ class CodexDetectorTests(unittest.TestCase):
             trace_id="id",
             events=(
                 event("response_item", 10, chars=9000, tool="read_file"),
-                event("response_item", 11, chars=20, tool="read_file"),
+                event("response_item", 11, chars=9000, tool="read_file"),
                 event("token_usage_record", 12, usage=TokenUsage(input_tokens=10)),
                 event("token_usage_record", 13, usage=TokenUsage(input_tokens=100)),
                 event("event_msg", 14, tool="retry_error"),

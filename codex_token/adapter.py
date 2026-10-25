@@ -127,6 +127,9 @@ def parse_rollout(path: Path, *, identifier_salt: str) -> RunTrace:
             usage = _usage(payload)
 
         tool_name = payload.get("name") if event_kind == "response_item" and isinstance(payload.get("name"), str) else None
+        visible_payload = payload
+        if event_kind == "response_item":
+            visible_payload = {key: payload[key] for key in ("output", "result", "content") if key in payload}
         events.append(CanonicalEvent(
             event_kind=event_kind,
             timestamp=timestamp,
@@ -136,7 +139,7 @@ def parse_rollout(path: Path, *, identifier_salt: str) -> RunTrace:
             model=model,
             usage=usage if event_kind == "token_usage_record" else None,
             tool_name=tool_name,
-            payload_chars=_payload_chars(payload),
+            payload_chars=_payload_chars(visible_payload),
             source_path=source_label,
             source_line=line_number,
             confidence=Confidence.HIGH if event_kind == "token_usage_record" else Confidence.MEDIUM,

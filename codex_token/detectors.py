@@ -17,8 +17,9 @@ def detect(trace: RunTrace) -> list[Finding]:
         findings.append(_finding("large_tool_output", "medium", "单条工具输出异常大", [event.source_line for event in large], {"threshold_chars": 8000, "count": len(large)}))
     repeated = {name: [event for event in tools if event.tool_name == name] for name in {event.tool_name for event in tools if event.tool_name}}
     for name, events in repeated.items():
-        if len(events) > 1:
-            findings.append(_finding("repeated_tool", "low", "同一工具在同一运行中重复出现", [event.source_line for event in events], {"tool_name": name, "count": len(events)}))
+        same_size = len({event.payload_chars for event in events}) == 1
+        if len(events) > 1 and same_size:
+            findings.append(_finding("repeated_tool", "low", "同一工具出现相同大小的重复结果，仍需人工确认", [event.source_line for event in events], {"count": len(events), "matching_result_sizes": True}, Confidence.LOW))
             break
     inputs = [(event.source_line, event.usage.input_tokens) for event in trace.events if event.usage and event.usage.input_tokens is not None]
     if len(inputs) >= 2 and inputs[-1][1] >= inputs[0][1] * 2:

@@ -8,6 +8,11 @@ from codex_token.mcp_server import handle_request
 
 
 class McpServerTests(unittest.TestCase):
+    def test_initialize_negotiates_protocol(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            response = handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}}, ContextOptimizer(Path(temporary)), Path(temporary))
+        self.assertEqual(response["result"]["protocolVersion"], "2025-03-26")
+        self.assertEqual(response["result"]["capabilities"], {"tools": {}})
     def test_tools_list_exposes_controlled_command_and_file_tools(self):
         with tempfile.TemporaryDirectory() as temporary:
             response = handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, ContextOptimizer(Path(temporary)), Path(temporary))

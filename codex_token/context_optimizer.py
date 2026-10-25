@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,13 +33,29 @@ class ContextOptimizer:
         storage_name = f"{source}-{digest}.txt"
         self._data_dir.mkdir(parents=True, exist_ok=True)
         (self._data_dir / storage_name).write_text(text, encoding="utf-8")
-        if digest in self._seen:
-            return OptimizedResult(f"重复结果已省略：{digest}；原始长度 {len(text)} 字符。", storage_name, len(text), True, True)
+        duplicate = digest in self._seen
+        if duplicate:
+            result = OptimizedResult(f"重复结果已省略：{digest}；原始长度 {len(text)} 字符。", storage_name, len(text), True, True)
+            self._write_receipt(source, digest, result, failed)
+            return result
         self._seen.add(digest)
+        visible = self._redact(text)
         if len(text) <= self._max_chars:
-            return OptimizedResult(text, storage_name, len(text), False, False)
-        errors = [line.strip() for line in text.splitlines() if "error" in line.lower() or "failed" in line.lower()]
+            result = OptimizedResult(visible, storage_name, len(text), False, False)
+            self._write_receipt(source, digest, result, failed)
+            return result
+        errors = [self._redact(line.strip()) for line in text.splitlines() if "error" in line.lower() or "failed" in line.lower()]
         summary = f"结果已压缩：原始长度 {len(text)} 字符，完整结果保存为 {storage_name}。"
         if failed and errors:
             summary = f"{summary}\n关键错误：{errors[0]}"
-        return OptimizedResult(summary[:self._max_chars], storage_name, len(text), True, False)
+        result = OptimizedResult(summary[:self._max_chars], storage_name, len(text), True, False)
+        self._write_receipt(source, digest, result, failed)
+        return result
+
+    @staticmethod
+    def _redact(text: str) -> str:
+        return re.sub(r"(?i)\b(api[_-]?key|token|password|secret)\s*[:=]\s*\S+", r"\1=[已脱敏]", text)
+
+    def _write_receipt(self, source: str, digest: str, result: OptimizedResult, failed: bool) -> None:
+        receipt = {"source": source, "content_id": digest, "original_chars": result.original_chars, "compressed": result.compressed, "duplicate": result.duplicate, "failed": failed, "storage_name": result.storage_name}
+        (self._data_dir / f"{digest}.receipt.json").write_text(json.dumps(receipt, ensure_ascii=False, sort_keys=True), encoding="utf-8")

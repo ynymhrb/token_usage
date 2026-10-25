@@ -39,6 +39,23 @@ class ContextOptimizerTests(unittest.TestCase):
         self.assertNotIn("same output", result.visible_text)
         self.assertIn("重复结果", result.visible_text)
 
+    def test_short_secret_and_error_secret_are_redacted_from_model_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            optimizer = ContextOptimizer(Path(temporary), max_chars=100)
+            short = optimizer.optimize("API_KEY=short-secret", source="command")
+            failed = optimizer.optimize("noise\nERROR API_KEY=error-secret\n" * 20, source="command", failed=True)
+        self.assertNotIn("short-secret", short.visible_text)
+        self.assertNotIn("error-secret", failed.visible_text)
+        self.assertIn("[已脱敏]", short.visible_text)
+
+    def test_receipt_records_decision_without_raw_content(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            optimizer = ContextOptimizer(Path(temporary), max_chars=80)
+            optimizer.optimize("API_KEY=secret", source="command")
+            receipt = next(Path(temporary).glob("*.json")).read_text(encoding="utf-8")
+        self.assertIn('"source": "command"', receipt)
+        self.assertNotIn("secret", receipt)
+
 
 if __name__ == "__main__":
     unittest.main()

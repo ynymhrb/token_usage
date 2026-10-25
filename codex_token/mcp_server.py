@@ -50,6 +50,16 @@ def _call(name: str, arguments: dict[str, Any], optimizer: ContextOptimizer, cwd
 
 def handle_request(request: dict[str, Any], optimizer: ContextOptimizer, cwd: Path) -> dict[str, Any]:
     request_id = request.get("id")
+    if request.get("method") == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "codex-context-optimizer", "version": "0.1.0"},
+            },
+        }
     if request.get("method") == "tools/list":
         return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": list(TOOLS)}}
     if request.get("method") == "tools/call" and isinstance(request.get("params"), dict):

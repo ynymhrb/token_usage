@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 import time
@@ -130,7 +131,7 @@ class CommandRunner:
         before = {path: path.stat().st_mtime_ns for path in discover_rollouts(sessions_root)}
         prompt = task["prompt"] if candidate["kind"] == "baseline" else f"{candidate['instruction'].strip()}\n\n{task['prompt']}"
         codex = subprocess.run(["codex", "exec", prompt], cwd=worktree, check=False, capture_output=True, text=True)
-        verify = subprocess.run(task["verify"].split(), cwd=worktree, check=False, capture_output=True, text=True)
+        verify = subprocess.run(shlex.split(task["verify"], posix=False), cwd=worktree, check=False, capture_output=True, text=True)
         passed = codex.returncode == 0
         changed = [path for path in discover_rollouts(sessions_root) if before.get(path) != path.stat().st_mtime_ns]
         traces = [parse_rollout(path, identifier_salt="experiment") for path in changed]

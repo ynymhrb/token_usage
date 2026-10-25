@@ -13,6 +13,8 @@ from typing import Sequence
 
 from .adapter import discover_rollouts, parse_rollout
 
+_EXECUTION_CAPABILITY = object()
+
 
 @dataclass(frozen=True)
 class ExperimentManifest:
@@ -118,6 +120,8 @@ class CommandRunner:
         subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(worktree)], check=False, capture_output=True, text=True)
 
     def run_candidate(self, worktree: Path, candidate: dict[str, str], task: dict[str, str]) -> RunResult:
+        if self._capability is not _EXECUTION_CAPABILITY:
+            raise PermissionError("真实执行只能由受控命令行入口发起")
         started = time.monotonic()
         sessions_root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "sessions"
         before = {path: path.stat().st_mtime_ns for path in discover_rollouts(sessions_root)}
@@ -132,6 +136,11 @@ class CommandRunner:
         input_tokens = sum(inputs) if inputs else None
         total_tokens = sum(totals) if totals else None
         return RunResult(passed, verify.returncode == 0, input_tokens, total_tokens, time.monotonic() - started)
+
+
+def _authorized_command_runner() -> CommandRunner:
+    """仅供 CLI 模块使用；公共默认运行器保持失效关闭。"""
+    return CommandRunner(_EXECUTION_CAPABILITY)
 
 
 def execute_manifest(manifest: ExperimentManifest, *, execute: bool, token_budget: int, runner: CommandRunner) -> list[RunResult]:
@@ -165,3 +174,6 @@ def execute_manifest(manifest: ExperimentManifest, *, execute: bool, token_budge
                 finally:
                     runner.remove_worktree(root, worktree)
     return results
+    def __init__(self, capability: object | None = None) -> None:
+        self._capability = capability
+

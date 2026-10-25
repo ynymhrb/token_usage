@@ -14,7 +14,7 @@ from .adapter import discover_rollouts, parse_rollout
 from .detectors import detect
 from .recommendations import recommend
 from .report import build_report, render_markdown_report, write_json_report
-from .experiments import CommandRunner, RunResult, compare_runs, execute_manifest, load_manifest, plan_manifest
+from .experiments import RunResult, _authorized_command_runner, compare_runs, execute_manifest, load_manifest, plan_manifest
 
 
 def _finding_dict(finding: object) -> dict[str, object]:
@@ -77,7 +77,7 @@ def _experiment_run(args: argparse.Namespace) -> int:
     return 2
     try:
         manifest = load_manifest(Path(args.manifest))
-        results = execute_manifest(manifest, execute=True, token_budget=manifest.token_budget, runner=CommandRunner())
+        results = execute_manifest(manifest, execute=True, token_budget=manifest.token_budget, runner=_authorized_command_runner())
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f"实验未启动或未完成：{type(error).__name__}", file=sys.stderr)
         return 2

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codex_token.experiments import ExperimentManifest, RunResult, compare_runs, execute_manifest, load_manifest, plan_manifest
+from codex_token.experiments import CommandRunner, ExperimentManifest, RunResult, compare_runs, execute_manifest, load_manifest, plan_manifest
 
 
 def passing_baseline():
@@ -96,6 +96,10 @@ class ExecutionGateTests(unittest.TestCase):
         runner = FakeRunner([RunResult(True, True, 1, 1, 1.0)])
         self.assertEqual(execute_manifest(self.manifest(), execute=False, token_budget=100, runner=runner), [])
         self.assertEqual(runner.calls, [])
+
+    def test_public_command_runner_is_fail_closed(self):
+        with self.assertRaises(PermissionError):
+            CommandRunner().run_candidate(Path("."), {"kind": "baseline"}, {"prompt": "x", "verify": "python"})
 
     def test_consecutive_quality_failures_stop_and_remove_worktree(self):
         runner = FakeRunner([RunResult(False, False, 1, 1, 1.0), RunResult(False, False, 1, 1, 1.0), RunResult(True, True, 1, 1, 1.0)])

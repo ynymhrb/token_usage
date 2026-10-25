@@ -21,6 +21,10 @@ class PluginPackageTests(unittest.TestCase):
         self.assertEqual(plugin["name"], "codex-context-optimizer")
         self.assertEqual(plugin["source"]["path"], "./codex-context-optimizer")
 
+    def test_controlled_mcp_tools_require_approval(self):
+        config = Path(".codex/config.toml").read_text(encoding="utf-8")
+        self.assertIn('default_tools_approval_mode = "prompt"', config)
+
 
 if __name__ == "__main__":
     unittest.main()

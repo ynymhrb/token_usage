@@ -1,2 +1,5 @@
 [plugins."codex-context-optimizer@token-usage-local"]
 enabled = true
+
+[plugins."codex-context-optimizer@token-usage-local".mcp_servers.context_optimizer]
+default_tools_approval_mode = "prompt"

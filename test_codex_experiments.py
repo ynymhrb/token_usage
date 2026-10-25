@@ -95,6 +95,18 @@ class ExecutionGateTests(unittest.TestCase):
         self.assertEqual(results[-1].stop_reason, "consecutive_quality_failures")
         self.assertEqual(runner.calls[-1][0], "remove")
 
+    def test_each_repetition_uses_a_fresh_worktree(self):
+        runner = FakeRunner([RunResult(True, True, 1, 1, 1.0) for _ in range(3)])
+        execute_manifest(self.manifest(), execute=True, token_budget=100, runner=runner)
+        self.assertEqual(len([call for call in runner.calls if isinstance(call, tuple) and call[0] == "create"]), 3)
+        self.assertEqual(len([call for call in runner.calls if isinstance(call, tuple) and call[0] == "remove"]), 3)
+
+    def test_unknown_token_usage_stops_before_a_second_paid_run(self):
+        runner = FakeRunner([RunResult(True, True, None, None, 1.0), RunResult(True, True, 1, 1, 1.0)])
+        results = execute_manifest(self.manifest(), execute=True, token_budget=100, runner=runner)
+        self.assertEqual(len([call for call in runner.calls if call == "unit"]), 1)
+        self.assertEqual(results[-1].stop_reason, "unknown_token_usage")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,22 +27,39 @@ def _finding(finding: Finding) -> dict[str, object]:
     }
 
 
+def _trace_signature(trace: RunTrace) -> tuple[object, ...]:
+    """跨追加文件识别同一组已解析事件；不使用文件路径或行号。"""
+    return tuple(
+        (event.event_kind, event.timestamp, event.session_id, event.turn_id, event.model,
+         event.tool_name, event.payload_chars, event.usage)
+        for event in trace.events
+    )
+
+
 def build_report(traces: Sequence[RunTrace], findings: Sequence[Finding]) -> dict[str, object]:
     """构建固定五区段报告，不接受也不回显原始转录内容。"""
-    gaps = [asdict(gap) for trace in traces for gap in trace.data_gaps]
+    unique_traces: list[RunTrace] = []
+    seen_signatures: set[tuple[object, ...]] = set()
+    for trace in traces:
+        signature = _trace_signature(trace)
+        if signature and signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        unique_traces.append(trace)
+    gaps = [asdict(gap) for trace in unique_traces for gap in trace.data_gaps]
     safe_gaps = [
         {**gap, "confidence": gap["confidence"].value, "evidence_lines": list(gap["evidence_lines"])}
         for gap in gaps
     ]
-    if not traces:
+    if not unique_traces:
         safe_gaps.append(_gap("no_traces", "没有可分析的 rollout"))
-    models = sorted({trace.model for trace in traces if trace.model})
+    models = sorted({trace.model for trace in unique_traces if trace.model})
     model_labels = {model: f"model_{hashlib.sha256(model.encode('utf-8')).hexdigest()[:12]}" for model in models}
     if models:
         safe_gaps.extend(_gap("unpriced_model", "模型没有匹配的价格表") for model in models)
 
     facts = {
-        "trace_count": len(traces),
+        "trace_count": len(unique_traces),
         "model_count": len(models),
         "traces": [
             {
@@ -56,12 +73,12 @@ def build_report(traces: Sequence[RunTrace], findings: Sequence[Finding]) -> dic
                     "total_tokens": trace.token_usage.total_tokens,
                 },
             }
-            for trace in traces
+            for trace in unique_traces
         ],
         "findings": [_finding(finding) for finding in findings if finding.evidence_kind.value == "fact"],
     }
-    known_input = [trace.token_usage.input_tokens for trace in traces if trace.token_usage.input_tokens is not None]
-    known_total = [trace.token_usage.total_tokens for trace in traces if trace.token_usage.total_tokens is not None]
+    known_input = [trace.token_usage.input_tokens for trace in unique_traces if trace.token_usage.input_tokens is not None]
+    known_total = [trace.token_usage.total_tokens for trace in unique_traces if trace.token_usage.total_tokens is not None]
     derived_metrics = {
         "known_input_tokens": sum(known_input) if known_input else None,
         "known_total_tokens": sum(known_total) if known_total else None,

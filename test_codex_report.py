@@ -38,6 +38,21 @@ class CodexReportTests(unittest.TestCase):
             report = build_report([parse_rollout(path, identifier_salt="test")], [])
         self.assertNotIn("secret-key", json.dumps(report))
 
+    def test_report_does_not_double_count_identical_appended_rollout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "first.jsonl"
+            second = root / "second.jsonl"
+            content = FIXTURE.read_text(encoding="utf-8")
+            first.write_text(content, encoding="utf-8")
+            second.write_text(content, encoding="utf-8")
+            report = build_report([
+                parse_rollout(first, identifier_salt="test"),
+                parse_rollout(second, identifier_salt="test"),
+            ], [])
+        self.assertEqual(report["derived_metrics"]["known_input_tokens"], 120)
+        self.assertEqual(report["facts"]["trace_count"], 1)
+
     def test_json_and_markdown_writers_keep_only_report_data(self):
         report = build_report([parse_rollout(FIXTURE, identifier_salt="test")], [])
         with tempfile.TemporaryDirectory() as temporary:

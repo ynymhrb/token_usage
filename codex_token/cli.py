@@ -14,7 +14,7 @@ from .adapter import discover_rollouts, parse_rollout
 from .detectors import detect
 from .recommendations import recommend
 from .report import build_report, render_markdown_report, write_json_report
-from .experiments import CommandRunner, execute_manifest, load_manifest, plan_manifest
+from .experiments import CommandRunner, RunResult, compare_runs, execute_manifest, load_manifest, plan_manifest
 
 
 def _finding_dict(finding: object) -> dict[str, object]:
@@ -79,6 +79,21 @@ def _experiment_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _compare(args: argparse.Namespace) -> int:
+    try:
+        def load(path: str) -> list[RunResult]:
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            if not isinstance(raw, list):
+                raise ValueError
+            return [RunResult(**row) for row in raw if isinstance(row, dict)]
+        result = compare_runs(load(args.baseline), load(args.candidate), args.primary_metric)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        print("比较输入必须是 RunResult 数组 JSON。", file=sys.stderr)
+        return 2
+    print(json.dumps(result.__dict__, ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codex-token", description="本地、脱敏的 Codex Token 诊断工具")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -90,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
     recommend_parser = commands.add_parser("recommend", help="从脱敏报告生成建议")
     recommend_parser.add_argument("report")
     recommend_parser.set_defaults(handler=_recommend)
+    compare = commands.add_parser("compare", help="比较保存的基线与候选运行结果")
+    compare.add_argument("baseline")
+    compare.add_argument("candidate")
+    compare.add_argument("--primary-metric", choices=("input_tokens", "total_tokens", "wall_seconds"), default="input_tokens")
+    compare.set_defaults(handler=_compare)
     experiment = commands.add_parser("experiment", help="管理受控实验")
     experiment_commands = experiment.add_subparsers(dest="experiment_command", required=True)
     plan = experiment_commands.add_parser("plan", help="只生成实验计划，不执行")

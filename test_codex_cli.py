@@ -42,6 +42,19 @@ class CodexCliTests(unittest.TestCase):
             code = main(["experiment", "run", "experiments/token-optimization-v1.json", "--budget-usd", "1"])
         self.assertEqual(code, 2)
 
+    def test_compare_emits_quality_regression_from_saved_runs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            baseline = root / "baseline.json"
+            candidate = root / "candidate.json"
+            baseline.write_text(json.dumps([{"task_passed": True, "quality_passed": True, "input_tokens": 100, "total_tokens": 100, "wall_seconds": 1}] * 3), encoding="utf-8")
+            candidate.write_text(json.dumps([{"task_passed": False, "quality_passed": False, "input_tokens": 10, "total_tokens": 10, "wall_seconds": 1}] * 3), encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = main(["compare", str(baseline), str(candidate)])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue())["status"], "quality_regression")
+
 
 if __name__ == "__main__":
     unittest.main()

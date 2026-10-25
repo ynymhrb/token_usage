@@ -53,7 +53,7 @@ class ContextOptimizerTests(unittest.TestCase):
             failed = optimizer.optimize("noise\nERROR API_KEY=error-secret\n" * 20, source="command", failed=True)
         self.assertNotIn("short-secret", short.visible_text)
         self.assertNotIn("error-secret", failed.visible_text)
-        self.assertIn("[已脱敏]", short.visible_text)
+        self.assertIn("[凭据已脱敏]", short.visible_text)
 
     def test_receipt_records_decision_without_raw_content(self):
         with tempfile.TemporaryDirectory() as temporary:

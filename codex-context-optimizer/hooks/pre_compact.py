@@ -23,7 +23,7 @@ if data_dir.is_dir():
 compressed = sum(bool(item.get("compressed")) for item in receipts)
 duplicates = sum(bool(item.get("duplicate")) for item in receipts)
 characters = sum(int(item.get("original_chars", 0)) for item in receipts)
-summary = f"受控工具记录：{len(receipts)} 次，压缩 {compressed} 次，重复省略 {duplicates} 次，原始输出合计 {characters} 字符。"
+summary = f"插件数据目录收据：{len(receipts)} 条，压缩 {compressed} 次，重复省略 {duplicates} 次，原始输出合计 {characters} 字符。"
 
 print(json.dumps({
     "hookSpecificOutput": {

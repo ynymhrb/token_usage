@@ -41,6 +41,38 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("same output", json.loads(first.stdout)["result"]["content"][0]["text"])
         self.assertIn("重复结果已省略", json.loads(second.stdout)["result"]["content"][0]["text"])
 
+    def test_self_contained_runtime_redacts_common_credentials(self):
+        script = Path("codex-context-optimizer/scripts/mcp_server.py").resolve()
+        request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "credentials.txt"}}}) + "\n"
+        secrets = "AWS_SECRET_ACCESS_KEY=leaked-value\nAuthorization: Bearer bearer-secret\nghp_abcdefghijklmnopqrstuvwxyz1234567890\npostgresql://admin:db-secret@example.test/app\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            Path(temporary, "credentials.txt").write_text(secrets, encoding="utf-8")
+            completed = subprocess.run([sys.executable, str(script)], input=request, text=True, capture_output=True, cwd=temporary, env=(os.environ | {"PLUGIN_DATA": str(Path(temporary, "data"))}), check=True)
+        visible = json.loads(completed.stdout)["result"]["content"][0]["text"]
+        for secret in ("leaked-value", "bearer-secret", "ghp_abcdefghijklmnopqrstuvwxyz1234567890", "db-secret"):
+            self.assertNotIn(secret, visible)
+
+    def test_self_contained_runtime_writes_a_receipt_for_every_call(self):
+        script = Path("codex-context-optimizer/scripts/mcp_server.py").resolve()
+        request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "sample.txt"}}}) + "\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            data = Path(temporary, "data")
+            Path(temporary, "sample.txt").write_text("same output", encoding="utf-8")
+            environment = os.environ | {"PLUGIN_DATA": str(data)}
+            for _ in range(2):
+                subprocess.run([sys.executable, str(script)], input=request, text=True, capture_output=True, cwd=temporary, env=environment, check=True)
+            receipts = list(data.glob("*.receipt.json"))
+            duplicate_count = sum(json.loads(path.read_text(encoding="utf-8"))["duplicate"] for path in receipts)
+            self.assertEqual(len(receipts), 2)
+            self.assertEqual(duplicate_count, 1)
+
+    def test_self_contained_runtime_silently_accepts_initialized_notification(self):
+        script = Path("codex-context-optimizer/scripts/mcp_server.py").resolve()
+        notification = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}) + "\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            completed = subprocess.run([sys.executable, str(script)], input=notification, text=True, capture_output=True, cwd=temporary, check=True)
+        self.assertEqual(completed.stdout, "")
+
     def test_pre_compact_hook_reports_receipt_counts_without_raw_output(self):
         script = Path("codex-context-optimizer/hooks/pre_compact.py").resolve()
         with tempfile.TemporaryDirectory() as temporary:
@@ -49,7 +81,7 @@ class PluginPackageTests(unittest.TestCase):
             Path(data, "abc.receipt.json").write_text(json.dumps({"original_chars": 5000, "compressed": True, "duplicate": False}), encoding="utf-8")
             completed = subprocess.run([sys.executable, str(script)], input=json.dumps({"session_id": "test-session"}), text=True, capture_output=True, cwd=temporary, env=(os.environ | {"PLUGIN_DATA": str(data)}), check=True)
         additional_context = json.loads(completed.stdout)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("受控工具记录：1 次，压缩 1 次，重复省略 0 次，原始输出合计 5000 字符", additional_context)
+        self.assertIn("插件数据目录收据：1 条，压缩 1 次，重复省略 0 次，原始输出合计 5000 字符", additional_context)
         self.assertNotIn("API_KEY", additional_context)
 
 

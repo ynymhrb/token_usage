@@ -133,23 +133,22 @@ def execute_manifest(manifest: ExperimentManifest, *, execute: bool, token_budge
     consecutive_quality_failures = 0
     for _ in range(manifest.repetitions):
         for task in manifest.tasks:
-            worktree = runner.create_worktree(root, manifest.baseline_commit)
-            try:
-                result = runner.run_candidate(worktree, manifest.candidate, task)
-                if result.input_tokens is None:
-                    results.append(RunResult(result.task_passed, result.quality_passed, None, result.total_tokens, result.wall_seconds, "unknown_token_usage"))
-                    return results
-                used_tokens += result.input_tokens or 0
-                if used_tokens >= token_budget:
-                    result = RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "token_budget_reached")
+            for variant in ({"kind": "baseline"}, manifest.candidate):
+                worktree = runner.create_worktree(root, manifest.baseline_commit)
+                try:
+                    result = runner.run_candidate(worktree, variant, task)
+                    if result.input_tokens is None:
+                        results.append(RunResult(result.task_passed, result.quality_passed, None, result.total_tokens, result.wall_seconds, "unknown_token_usage"))
+                        return results
+                    used_tokens += result.input_tokens
+                    if used_tokens >= token_budget:
+                        results.append(RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "token_budget_reached"))
+                        return results
+                    consecutive_quality_failures = 0 if result.quality_passed else consecutive_quality_failures + 1
+                    if consecutive_quality_failures >= 2:
+                        results.append(RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "consecutive_quality_failures"))
+                        return results
                     results.append(result)
-                    return results
-                consecutive_quality_failures = 0 if result.quality_passed else consecutive_quality_failures + 1
-                if consecutive_quality_failures >= 2:
-                    result = RunResult(result.task_passed, result.quality_passed, result.input_tokens, result.total_tokens, result.wall_seconds, "consecutive_quality_failures")
-                    results.append(result)
-                    return results
-                results.append(result)
-            finally:
-                runner.remove_worktree(root, worktree)
+                finally:
+                    runner.remove_worktree(root, worktree)
     return results

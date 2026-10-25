@@ -68,7 +68,7 @@ class FakeRunner:
         self.calls.append(("remove", str(worktree)))
 
     def run_candidate(self, worktree, candidate, task):
-        self.calls.append(task["id"])
+        self.calls.append(("run", candidate["kind"], task["id"]))
         return self.results.pop(0)
 
 
@@ -79,7 +79,7 @@ class ExecutionGateTests(unittest.TestCase):
     def test_execute_manifest_stops_at_token_budget_without_a_second_run(self):
         runner = FakeRunner([RunResult(True, True, 120, 120, 1.0), RunResult(True, True, 120, 120, 1.0)])
         results = execute_manifest(self.manifest(), execute=True, token_budget=100, runner=runner)
-        self.assertEqual([call for call in runner.calls if call == "unit"], ["unit"])
+        self.assertEqual(len([call for call in runner.calls if isinstance(call, tuple) and call[0] == "run"]), 1)
         self.assertEqual(runner.calls[-1][0], "remove")
         self.assertEqual(results[0].stop_reason, "token_budget_reached")
 
@@ -91,20 +91,21 @@ class ExecutionGateTests(unittest.TestCase):
     def test_consecutive_quality_failures_stop_and_remove_worktree(self):
         runner = FakeRunner([RunResult(False, False, 1, 1, 1.0), RunResult(False, False, 1, 1, 1.0), RunResult(True, True, 1, 1, 1.0)])
         results = execute_manifest(self.manifest(), execute=True, token_budget=100, runner=runner)
-        self.assertEqual(len([call for call in runner.calls if call == "unit"]), 2)
+        self.assertEqual(len([call for call in runner.calls if isinstance(call, tuple) and call[0] == "run"]), 2)
         self.assertEqual(results[-1].stop_reason, "consecutive_quality_failures")
         self.assertEqual(runner.calls[-1][0], "remove")
 
     def test_each_repetition_uses_a_fresh_worktree(self):
-        runner = FakeRunner([RunResult(True, True, 1, 1, 1.0) for _ in range(3)])
+        runner = FakeRunner([RunResult(True, True, 1, 1, 1.0) for _ in range(6)])
         execute_manifest(self.manifest(), execute=True, token_budget=100, runner=runner)
-        self.assertEqual(len([call for call in runner.calls if isinstance(call, tuple) and call[0] == "create"]), 3)
-        self.assertEqual(len([call for call in runner.calls if isinstance(call, tuple) and call[0] == "remove"]), 3)
+        self.assertEqual(len([call for call in runner.calls if isinstance(call, tuple) and call[0] == "create"]), 6)
+        self.assertEqual(len([call for call in runner.calls if isinstance(call, tuple) and call[0] == "remove"]), 6)
+        self.assertEqual({call[1] for call in runner.calls if isinstance(call, tuple) and call[0] == "run"}, {"baseline", "narrow_prompt"})
 
     def test_unknown_token_usage_stops_before_a_second_paid_run(self):
         runner = FakeRunner([RunResult(True, True, None, None, 1.0), RunResult(True, True, 1, 1, 1.0)])
         results = execute_manifest(self.manifest(), execute=True, token_budget=100, runner=runner)
-        self.assertEqual(len([call for call in runner.calls if call == "unit"]), 1)
+        self.assertEqual(len([call for call in runner.calls if isinstance(call, tuple) and call[0] == "run"]), 1)
         self.assertEqual(results[-1].stop_reason, "unknown_token_usage")
 
 

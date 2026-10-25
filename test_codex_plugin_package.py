@@ -44,12 +44,12 @@ class PluginPackageTests(unittest.TestCase):
     def test_self_contained_runtime_redacts_common_credentials(self):
         script = Path("codex-context-optimizer/scripts/mcp_server.py").resolve()
         request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "credentials.txt"}}}) + "\n"
-        secrets = "AWS_SECRET_ACCESS_KEY=leaked-value\nAuthorization: Bearer bearer-secret\nghp_abcdefghijklmnopqrstuvwxyz1234567890\npostgresql://admin:db-secret@example.test/app\n"
+        secrets = "AWS_SECRET_ACCESS_KEY=leaked-value\nAWS_SESSION_TOKEN=session-secret\nAuthorization: Bearer bearer-secret\nAuthorization: Token token-secret\nghp_abcdefghijklmnopqrstuvwxyz1234567890\ngithub_pat_abcdefghijklmnopqrstuvwxyz0123456789\npostgresql://admin:db-secret@example.test/app\nhttps://admin:https-secret@example.test/path\n"
         with tempfile.TemporaryDirectory() as temporary:
             Path(temporary, "credentials.txt").write_text(secrets, encoding="utf-8")
             completed = subprocess.run([sys.executable, str(script)], input=request, text=True, capture_output=True, cwd=temporary, env=(os.environ | {"PLUGIN_DATA": str(Path(temporary, "data"))}), check=True)
         visible = json.loads(completed.stdout)["result"]["content"][0]["text"]
-        for secret in ("leaked-value", "bearer-secret", "ghp_abcdefghijklmnopqrstuvwxyz1234567890", "db-secret"):
+        for secret in ("leaked-value", "session-secret", "bearer-secret", "token-secret", "ghp_abcdefghijklmnopqrstuvwxyz1234567890", "github_pat_abcdefghijklmnopqrstuvwxyz0123456789", "db-secret", "https-secret"):
             self.assertNotIn(secret, visible)
 
     def test_self_contained_runtime_writes_a_receipt_for_every_call(self):

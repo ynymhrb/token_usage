@@ -59,9 +59,10 @@ class ContextOptimizer:
     @staticmethod
     def _redact(text: str) -> str:
         text = re.sub(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----", "[私钥已脱敏]", text, flags=re.IGNORECASE)
-        text = re.sub(r"(?i)\b(?:api[_-]?key|token|password|secret|aws_secret_access_key|access[_-]?key|client_secret|private_key)\b\s*[:=]\s*[^\s,;]+", "[凭据已脱敏]", text)
-        text = re.sub(r"(?i)(authorization\s*:\s*bearer\s+)[^\s]+", r"\1[已脱敏]", text)
-        text = re.sub(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b", "[GitHub 令牌已脱敏]", text)
+        text = re.sub(r"(?i)\b(?:api[_-]?key|token|password|secret|aws_secret_access_key|aws_(?:session_)?token|access[_-]?key|client_secret|private_key)\b\s*[:=]\s*[^\s,;]+", "[凭据已脱敏]", text)
+        text = re.sub(r"(?i)(authorization\s*:\s*[a-z][a-z0-9_-]*\s+)[^\s]+", r"\1[已脱敏]", text)
+        text = re.sub(r"\b(?:gh[pousr]_\w{20,}|github_pat_\w{20,})\b", "[GitHub 令牌已脱敏]", text)
+        text = re.sub(r"(?i)https?://[^\s/@:]+:[^@\s]+@[^\s]+", "[带凭据 URL 已脱敏]", text)
         return re.sub(r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^\s]+", "[连接串已脱敏]", text)
 
     def _write_receipt(self, source: str, digest: str, result: OptimizedResult, failed: bool) -> None:

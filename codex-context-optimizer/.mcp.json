@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "context_optimizer": {
+      "command": "python",
+      "args": ["${PLUGIN_ROOT}/scripts/mcp_server.py"]
+    }
+  }
+}

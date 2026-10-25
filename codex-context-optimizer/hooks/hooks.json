@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python ${PLUGIN_ROOT}/hooks/pre_compact.py",
+            "commandWindows": "py -3 ${PLUGIN_ROOT}\\hooks\\pre_compact.py",
+            "additionalContextLimit": 600,
+            "timeout": 10,
+            "statusMessage": "生成受控工具上下文摘要"
+          }
+        ]
+      }
+    ]
+  }
+}

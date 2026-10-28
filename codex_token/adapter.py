@@ -19,6 +19,7 @@ KNOWN_EVENT_TYPES = {
     "token_usage_record",
 }
 SUPPORTED_SUFFIXES = {".jsonl"}
+DERIVED_EXPORT_SUFFIXES = (".api_trace.jsonl", ".llm_calls.jsonl")
 
 
 def discover_rollouts(root: Path) -> list[Path]:
@@ -27,7 +28,9 @@ def discover_rollouts(root: Path) -> list[Path]:
         return []
     return sorted(
         path for path in root.rglob("*")
-        if path.is_file() and (path.suffix in SUPPORTED_SUFFIXES or path.suffix in {".zst", ".gz", ".zip"})
+        if path.is_file()
+        and not path.name.endswith(DERIVED_EXPORT_SUFFIXES)
+        and (path.suffix in SUPPORTED_SUFFIXES or path.suffix in {".zst", ".gz", ".zip"})
     )
 
 

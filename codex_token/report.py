@@ -38,10 +38,13 @@ def _trace_signature(trace: RunTrace) -> tuple[object, ...]:
 
 def build_report(traces: Sequence[RunTrace], findings: Sequence[Finding]) -> dict[str, object]:
     """构建固定五区段报告，不接受也不回显原始转录内容。"""
+    unavailable_traces = [trace for trace in traces if not trace.events]
     unique_traces: list[RunTrace] = []
     seen_signatures: set[tuple[object, ...]] = set()
     by_trace_id: dict[str, RunTrace] = {}
     for trace in traces:
+        if not trace.events:
+            continue
         signature = _trace_signature(trace)
         if signature and signature in seen_signatures:
             continue
@@ -50,7 +53,7 @@ def build_report(traces: Sequence[RunTrace], findings: Sequence[Finding]) -> dic
         if previous is None or len(trace.events) > len(previous.events):
             by_trace_id[trace.trace_id] = trace
     unique_traces = list(by_trace_id.values())
-    gaps = [asdict(gap) for trace in unique_traces for gap in trace.data_gaps]
+    gaps = [asdict(gap) for trace in unique_traces + unavailable_traces for gap in trace.data_gaps]
     safe_gaps = [
         {**gap, "confidence": gap["confidence"].value, "evidence_lines": list(gap["evidence_lines"])}
         for gap in gaps
@@ -64,6 +67,7 @@ def build_report(traces: Sequence[RunTrace], findings: Sequence[Finding]) -> dic
 
     facts = {
         "trace_count": len(unique_traces),
+        "unavailable_trace_count": len(unavailable_traces),
         "model_count": len(models),
         "traces": [
             {

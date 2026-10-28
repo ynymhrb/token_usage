@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from codex_token.adapter import parse_rollout
+from codex_token.models import DataGap, RunTrace
 from codex_token.report import build_report, render_markdown_report, write_json_report
 
 
@@ -74,6 +75,16 @@ class CodexReportTests(unittest.TestCase):
 
         self.assertEqual(json.loads(content), report)
         self.assertIn("# Codex Token 证据报告", render_markdown_report(report))
+
+    def test_unreadable_archives_are_data_gaps_not_analyzed_traces(self):
+        readable = parse_rollout(FIXTURE, identifier_salt="test")
+        unreadable = RunTrace(trace_id="archive", data_gaps=(DataGap("unsupported_compression", "不支持压缩 rollout"),))
+
+        report = build_report([readable, unreadable], [])
+
+        self.assertEqual(report["facts"]["trace_count"], 1)
+        self.assertEqual(report["facts"]["unavailable_trace_count"], 1)
+        self.assertIn("unsupported_compression", {gap["code"] for gap in report["data_gaps"]})
 
 
 if __name__ == "__main__":

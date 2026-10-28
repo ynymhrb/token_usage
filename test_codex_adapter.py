@@ -39,6 +39,17 @@ class CodexAdapterTests(unittest.TestCase):
         self.assertIn("missing_timezone", codes)
         self.assertIn("unsupported_compression", codes)
 
+    def test_discover_rollouts_excludes_derived_trace_exports(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "rollout.jsonl").write_text("{}\n", encoding="utf-8")
+            (root / "rollout.api_trace.jsonl").write_text("{}\n", encoding="utf-8")
+            (root / "rollout.llm_calls.jsonl").write_text("{}\n", encoding="utf-8")
+
+            discovered = discover_rollouts(root)
+
+        self.assertEqual([path.name for path in discovered], ["rollout.jsonl"])
+
 
 if __name__ == "__main__":
     unittest.main()

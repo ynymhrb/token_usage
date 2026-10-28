@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .adapter import discover_rollouts
 from .models import DataGap
 
 
@@ -41,12 +42,20 @@ class ContextAttribution:
     call_count: int
     category_chars: Mapping[str, int]
     data_gaps: tuple[DataGap, ...]
+    discovered_rollout_count: int = 0
+    rollouts_with_request_structure: int = 0
 
 
 def discover_context_exports(root: Path) -> list[Path]:
     if not root.exists() or not root.is_dir():
         return []
     return sorted(path for path in root.rglob(f"*{EXPORT_SUFFIX}") if path.is_file())
+
+
+def _rollout_key(path: Path, root: Path, suffix: str) -> str:
+    """用相对路径和去掉格式后缀的基名关联导出，不保留绝对路径。"""
+    relative = path.relative_to(root)
+    return str(relative.with_name(relative.name.removesuffix(suffix)))
 
 
 def _serialized_chars(value: object) -> int:
@@ -96,8 +105,22 @@ def analyze_context_exports(root: Path) -> ContextAttribution:
     gaps: list[DataGap] = []
     call_count = 0
     paths = discover_context_exports(root)
+    rollouts = discover_rollouts(root)
+    rollout_keys = {
+        _rollout_key(path, root, ".jsonl.zst" if path.name.endswith(".jsonl.zst") else path.suffix)
+        for path in rollouts
+    }
+    export_keys = {_rollout_key(path, root, EXPORT_SUFFIX) for path in paths}
+    covered_rollout_count = len(rollout_keys & export_keys)
+    missing_rollout_count = len(rollout_keys - export_keys)
     if not paths:
         gaps.append(DataGap("missing_request_structure", "没有保存的完整请求结构，无法归因上下文类别", ()))
+    elif missing_rollout_count:
+        gaps.append(DataGap(
+            "incomplete_request_structure",
+            f"有 {missing_rollout_count} 个已发现 rollout 缺少对应请求结构，类别占比不是全量覆盖",
+            (),
+        ))
     for path in paths:
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
@@ -115,7 +138,13 @@ def analyze_context_exports(root: Path) -> ContextAttribution:
                 continue
             counts.update(_classify_request(record["request"]))
             call_count += 1
-    return ContextAttribution(call_count, dict(counts), tuple(gaps))
+    return ContextAttribution(
+        call_count,
+        dict(counts),
+        tuple(gaps),
+        discovered_rollout_count=len(rollout_keys),
+        rollouts_with_request_structure=covered_rollout_count,
+    )
 
 
 def context_report(attribution: ContextAttribution) -> dict[str, object]:
@@ -154,10 +183,15 @@ def context_report(attribution: ContextAttribution) -> dict[str, object]:
         "schema_version": 1,
         "scope": {
             "saved_request_call_count": attribution.call_count,
+            "discovered_rollout_count": attribution.discovered_rollout_count,
+            "rollouts_with_request_structure": attribution.rollouts_with_request_structure,
+            "rollouts_without_request_structure": (
+                attribution.discovered_rollout_count - attribution.rollouts_with_request_structure
+            ),
             "exact_token_attribution": "不可得：当前请求结构导出没有可验证的一对一 Token 使用记录。",
             "measurement": "按稳定 JSON 序列化字符数归类；可比较占比，不可作为账单 Token。",
         },
         "categories": categories,
-        "data_gaps": [{"code": gap.code, "message": gap.message, "lines": list(gap.source_lines)} for gap in attribution.data_gaps],
+        "data_gaps": [{"code": gap.code, "summary": gap.summary, "lines": list(gap.evidence_lines)} for gap in attribution.data_gaps],
         "recommendations": recommendations,
     }

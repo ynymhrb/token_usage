@@ -4,6 +4,12 @@
 
 `python -m codex_token recommend REPORT.json` 只读取已经脱敏的报告，拒绝原始 JSONL。
 
+## 上下文构成归因
+
+`python -m codex_token context-breakdown --sessions-root PATH --output D:\\ai_tmp\\tokenUsage\\context.json` 会读取保存的 `*.llm_calls.jsonl` 请求结构，分别输出静态指令、工具定义、开发者/用户/助手消息、工具参数、工具结果和不可归因项的占比，并给出优先优化建议。
+
+这个命令不会回显请求或工具正文。它用稳定 JSON 字符数作为结构占比代理，因此能回答“哪一类上下文最臃肿”，但不是精确 Token 账单。只有请求结构与同一次调用的 `token_usage_record` 可验证关联时，才能进一步给每一类校准 Token；当前本机历史导出不具备该关联，报告会明确显示这个缺口，而不会把全局 Token 总量硬分摊。
+
 Codex 的本地转录格式不是公开稳定协议；成本字段只是估算的前提数据，不等于订阅的真实扣费。工具默认不修改仓库，也不调用 Codex。
 
 `python -m codex_token experiment plan experiments/token-optimization-v1.json` 仅生成计划；真实执行必须另获用户明确授权。

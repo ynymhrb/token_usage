@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codex_token.context_attribution import analyze_context_exports
+from codex_token.context_attribution import analyze_context_exports, context_report
 
 
 class ContextAttributionTests(unittest.TestCase):
@@ -55,6 +55,22 @@ class ContextAttributionTests(unittest.TestCase):
 
         self.assertEqual(result.call_count, 1)
         self.assertIn("invalid_request_export", {gap.code for gap in result.data_gaps})
+
+    def test_partial_request_exports_report_missing_rollout_coverage(self):
+        good = {"request": {"input": []}}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "covered.jsonl").write_text("{}\n", encoding="utf-8")
+            (root / "covered.llm_calls.jsonl").write_text(json.dumps(good) + "\n", encoding="utf-8")
+            (root / "uncovered.jsonl").write_text("{}\n", encoding="utf-8")
+            result = analyze_context_exports(root)
+
+        self.assertEqual(result.discovered_rollout_count, 2)
+        self.assertEqual(result.rollouts_with_request_structure, 1)
+        self.assertIn("incomplete_request_structure", {gap.code for gap in result.data_gaps})
+        rendered = context_report(result)
+        self.assertEqual(rendered["scope"]["rollouts_without_request_structure"], 1)
+        self.assertEqual(rendered["data_gaps"][0]["code"], "incomplete_request_structure")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .adapter import discover_rollouts, parse_rollout
+from .context_attribution import analyze_context_exports, context_report
 from .detectors import detect
 from .recommendations import recommend
 from .report import build_report, render_markdown_report, write_json_report
@@ -52,6 +53,15 @@ def _recommend(args: argparse.Namespace) -> int:
         print("无法读取 JSON 报告。", file=sys.stderr)
         return 2
     print(json.dumps([_finding_dict(item) for item in recommend(report)], ensure_ascii=False, indent=2))
+    return 0
+
+
+def _context_breakdown(args: argparse.Namespace) -> int:
+    report = context_report(analyze_context_exports(Path(args.sessions_root)))
+    rendered = json.dumps(report, ensure_ascii=False, indent=2)
+    if args.output:
+        write_json_report(Path(args.output), report)
+    print(rendered)
     return 0
 
 
@@ -99,6 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--format", choices=("json", "md"), default="json")
     analyze.add_argument("--output")
     analyze.set_defaults(handler=_analyze)
+    context_breakdown = commands.add_parser("context-breakdown", help="按保存请求结构分析上下文构成")
+    context_breakdown.add_argument("--sessions-root", default=str(Path.home() / ".codex" / "sessions"))
+    context_breakdown.add_argument("--output")
+    context_breakdown.set_defaults(handler=_context_breakdown)
     recommend_parser = commands.add_parser("recommend", help="从脱敏报告生成建议")
     recommend_parser.add_argument("report")
     recommend_parser.set_defaults(handler=_recommend)

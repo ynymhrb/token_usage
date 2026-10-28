@@ -29,6 +29,35 @@ class CodexCliTests(unittest.TestCase):
             code = main(["recommend", "tests/fixtures/codex/rollout-valid.jsonl"])
         self.assertNotEqual(code, 0)
 
+    def test_context_breakdown_reports_structure_without_request_body(self):
+        record = {
+            "request": {
+                "instructions": {"text": "静态规则"},
+                "persisted_dynamic_tools": [{"name": "exec"}],
+                "input": [
+                    {"type": "message", "role": "user", "content": "私密用户问题"},
+                    {"type": "function_call_output", "output": "私密工具输出"},
+                ],
+            }
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            destination = root / "context.json"
+            (root / "sample.llm_calls.jsonl").write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = main(["context-breakdown", "--sessions-root", str(root), "--output", str(destination)])
+
+            written = json.loads(destination.read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        rendered = output.getvalue()
+        self.assertNotIn("私密用户问题", rendered)
+        self.assertNotIn("私密工具输出", rendered)
+        self.assertEqual(written["scope"]["saved_request_call_count"], 1)
+        self.assertEqual(written["scope"]["exact_token_attribution"], "不可得：当前请求结构导出没有可验证的一对一 Token 使用记录。")
+        self.assertTrue(written["recommendations"])
+
     def test_experiment_plan_is_read_only(self):
         output = io.StringIO()
         with redirect_stdout(output):

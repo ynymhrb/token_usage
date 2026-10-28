@@ -43,6 +43,6 @@
 - Modify: `codex_token/recommendations.py`
 - Test: `test_codex_cli.py`
 
-- [ ] 写出会失败的命令行报告测试。
-- [ ] 实现 `context-breakdown` 只读命令、校准估算和类别建议。
-- [ ] 运行全量测试、实机只读分析并提交。
+- [x] 写出会失败的命令行报告测试。
+- [x] 实现 `context-breakdown` 只读命令、类别建议和不可校准时的明确降级。
+- [x] 运行全量测试、实机只读分析并提交。

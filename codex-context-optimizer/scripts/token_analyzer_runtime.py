@@ -166,6 +166,109 @@ def _context(paths: Iterable[Path]) -> tuple[int, Counter[str]]:
     return calls, counts
 
 
+def _category_rows(categories: Counter[str]) -> list[tuple[str, int, float | None, str]]:
+    total = sum(categories.values())
+    actions = {
+        "static_instructions": "暂不优先；先检查是否存在重复规则。",
+        "tool_definitions": "按任务缩小常驻工具定义。",
+        "developer_messages": "合并重复开发者规则。",
+        "user_messages": "合并重复需求描述。",
+        "assistant_history": "完成阶段后生成短摘要。",
+        "tool_arguments": "避免重复传入大文本。",
+        "tool_results": "优先摘要化、落文件并按需读取。",
+        "unattributable": "先补采集，不能安全地下结论。",
+    }
+    return [
+        (key, categories[key], round(categories[key] / total, 6) if total else None, actions[key])
+        for key in _CATEGORIES
+    ]
+
+
+def _diagnostic_markdown(
+    *,
+    scope_description: str,
+    rollout_count: int,
+    readable_trace_count: int,
+    input_tokens: int,
+    output_tokens: int,
+    cached_tokens: int,
+    uncached_tokens: int,
+    cache_ratio: float | None,
+    request_call_count: int,
+    export_rollout_count: int,
+    categories: Counter[str],
+) -> str:
+    """生成聊天窗可读诊断；未知数据显式保留为缺口。"""
+    cache_percent = f"{cache_ratio * 100:.1f}%" if cache_ratio is not None else "不可得"
+    coverage = f"{export_rollout_count}/{rollout_count}" if rollout_count else "0/0"
+    lines = [
+        "# Codex 上下文与 Token 诊断", "",
+        "## 结论", "",
+        f"- 分析范围：{scope_description}；发现 {rollout_count} 个 rollout，可读 trace {readable_trace_count} 个。",
+        f"- 输入 Token {input_tokens:,}；缓存命中 {cached_tokens:,}（{cache_percent}）；非缓存差额 {uncached_tokens:,}；输出 Token {output_tokens:,}。",
+    ]
+    observed_category_characters = sum(categories.values())
+    if request_call_count and observed_category_characters:
+        rows = _category_rows(categories)
+        top = max(rows, key=lambda row: row[1])
+        lines.append(f"- 已保存请求结构中最大类别为 {_LABELS[top[0]]}（{top[2]:.1%}）；这是字符代理样本，不是精确 Token 账单。")
+    elif request_call_count:
+        lines.append("- 已保存请求结构为空或没有可分类内容，不能判断系统提示、Skill、消息或工具结果哪个占主要部分。")
+    else:
+        lines.append("- 当前没有已保存请求结构，不能判断系统提示、Skill、消息或工具结果哪个占主要部分。")
+    lines.extend([
+        "", "## 覆盖率与可信度", "",
+        "| 项目 | 数值 | 可信度 | 含义 |",
+        "|---|---:|---|---|",
+        f"| 发现的 rollout | {rollout_count} | 精确 | 当前范围内的本地文件数 |",
+        f"| 有 Token 使用记录的 trace | {readable_trace_count} | 精确 | 可汇总输入、输出和缓存字段 |",
+        f"| 有完整请求结构的 rollout | {coverage} | 精确 | 可做上下文类别归因的覆盖量 |",
+        f"| 有完整请求结构的调用 | {request_call_count} | 精确 | 类别分析样本 |",
+        "| 上下文类别结论 | 样本级 | 有限 | 不代表未保存请求结构的 rollout |",
+        "", "## 精确 Token 总览", "",
+        "| 指标 | Token | 说明 |",
+        "|---|---:|---|",
+        f"| 输入 Token | {input_tokens:,} | 本地 `token_usage_record` 汇总 |",
+        f"| 输出 Token | {output_tokens:,} | 本地 `token_usage_record` 汇总 |",
+        f"| 缓存读取 Token | {cached_tokens:,} | 本地记录字段 |",
+        f"| 非缓存输入差额 | {uncached_tokens:,} | 输入减缓存；不等于订阅扣减或美元成本 |",
+        "", "> 本地记录不能推出订阅额度、真实计费或服务端压缩细节。", "",
+        "## 上下文构成", "",
+    ])
+    if request_call_count and observed_category_characters:
+        lines.extend([
+            "| 类别 | 占已观测请求结构 | 结论 | 可做动作 |",
+            "|---|---:|---|---|",
+        ])
+        for key, _, share, action in _category_rows(categories):
+            share_text = f"{share:.1%}" if share is not None else "不可得"
+            lines.append(f"| {_LABELS[key]} | {share_text} | 请求结构字符代理 | {action} |")
+    else:
+        lines.append("当前范围没有完整请求结构导出；类别表不可得，不能据此给出来源排序。")
+    lines.extend([
+        "", "## 工具结果细分", "",
+        "当前本地导出尚未保存工具调用名称与结果的一对一归因表；不能诚实地拆成命令、文件、网页或子代理类别。",
+        "", "## 消耗排行", "",
+        "当前聊天窗导出只保证 Token 汇总，不保证每次调用都带可关联的时间、会话和用户回合字段；对应排行在字段缺失时不可得。",
+        "", "## 可执行优化建议", "",
+        "1. 若后续请求结构显示工具结果占比最高，优先采用“结论 + 文件引用 + 可展开详情”，不要先删 Skill。",
+        "2. 对已完成阶段生成短状态摘要，避免整段历史工具输出反复进入后续请求。",
+        "3. 仅在类别覆盖充分时再缩短静态指令、Skill 或工具 schema。",
+        "", "## 数据缺口", "",
+    ])
+    if request_call_count and observed_category_characters:
+        lines.append(f"- 请求结构仅覆盖 {coverage} 个 rollout；类别比例只代表该样本。")
+    elif request_call_count:
+        lines.append(f"- 已保存请求结构覆盖 {coverage} 个 rollout，但内容为空或没有可分类字段，无法做来源归因。")
+    else:
+        lines.append(f"- {rollout_count} 个 rollout 均没有对应完整请求结构，无法做系统提示、Skill、消息和工具结果归因。")
+    lines.extend([
+        "- 静态指令为合并字段，不能精确拆成系统提示、AGENTS 和 Skill 各自占用。",
+        "- 本地记录不能推出订阅额度、真实计费或服务端压缩细节。",
+    ])
+    return "\n".join(lines)
+
+
 def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path, output_dir: Path, current_session_id: str | None, now: datetime) -> dict[str, object]:
     selected_focus = (focus or "full").lower()
     if selected_focus not in {"full", "context", "tools"}:
@@ -174,48 +277,46 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
     rollouts = _select(_rollouts(sessions_root), scope)
     exports = _select(_exports(sessions_root), scope)
     metadata = {"kind": scope[0], "description": scope[1], "matched_rollout_count": len(rollouts)}
-    if selected_focus == "context":
-        calls, categories = _context(exports)
+    input_tokens, output_tokens, cached_tokens, readable = _usage(rollouts)
+    uncached_tokens = max(0, input_tokens - cached_tokens)
+    cache_ratio = round(cached_tokens / input_tokens, 6) if input_tokens else None
+    calls, categories = _context(exports)
+    report: dict[str, object] = {
+        "analysis_scope": metadata,
+        "facts": {
+            "trace_count": readable,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cached_input_tokens": cached_tokens,
+            "uncached_input_tokens_difference": uncached_tokens,
+            "cache_hit_share_of_input": cache_ratio,
+        },
+    }
+    if calls:
         total = sum(categories.values())
         top = max(categories, key=categories.get, default="unattributable")
-        report: dict[str, object] = {"analysis_scope": metadata, "scope": {"saved_request_call_count": calls, "measurement": "请求结构字符代理；不是精确 Token 账单"}, "top_category": {"category": top, "label": _LABELS[top], "share": round(categories[top] / total, 6) if total else None}, "categories": dict(categories)}
-        summary = f"上下文构成：范围={scope[1]}；匹配 rollout={len(rollouts)}；最大类别={_LABELS[top]}。"
-    else:
-        input_tokens, output_tokens, cached_tokens, readable = _usage(rollouts)
-        uncached_tokens = max(0, input_tokens - cached_tokens)
-        cache_ratio = round(cached_tokens / input_tokens, 6) if input_tokens else None
-        calls, categories = _context(exports)
-        report = {
-            "analysis_scope": metadata,
-            "facts": {
-                "trace_count": readable,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cached_input_tokens": cached_tokens,
-                "uncached_input_tokens_difference": uncached_tokens,
-                "cache_hit_share_of_input": cache_ratio,
-            },
+        report["context_attribution"] = {
+            "saved_request_call_count": calls,
+            "measurement": "请求结构字符代理；不是精确 Token 账单",
+            "top_category": {"category": top, "label": _LABELS[top], "share": round(categories[top] / total, 6) if total else None},
+            "categories": dict(categories),
         }
-        if calls:
-            total = sum(categories.values())
-            top = max(categories, key=categories.get, default="unattributable")
-            report["context_attribution"] = {
-                "saved_request_call_count": calls,
-                "measurement": "请求结构字符代理；不是精确 Token 账单",
-                "top_category": {"category": top, "label": _LABELS[top], "share": round(categories[top] / total, 6) if total else None},
-                "categories": dict(categories),
-            }
-            attribution_line = f"请求结构归因：最大类别={_LABELS[top]}。"
-        else:
-            report["data_gaps"] = "未找到当前范围的请求结构导出；无法将输入 Token 归因到系统提示、Skill、消息或工具结果。"
-            attribution_line = "归因缺口：未保存请求结构，无法区分系统提示、Skill、消息和工具结果。"
-        label = "工具相关 Token 概览" if selected_focus == "tools" else "Token 概览"
-        cache_percent = f"{cache_ratio * 100:.1f}%" if cache_ratio is not None else "未知"
-        summary = (
-            f"{label}：范围={scope[1]}；可读 trace={readable}。\n"
-            f"输入={input_tokens:,}；其中缓存命中={cached_tokens:,}（{cache_percent}），非缓存差额={uncached_tokens:,}；输出={output_tokens:,}。\n"
-            f"{attribution_line}"
-        )
+    else:
+        report["data_gaps"] = "未找到当前范围的请求结构导出；无法将输入 Token 归因到系统提示、Skill、消息或工具结果。"
+    report["chat_diagnostic"] = _diagnostic_markdown(
+        scope_description=scope[1],
+        rollout_count=len(rollouts),
+        readable_trace_count=readable,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cached_tokens=cached_tokens,
+        uncached_tokens=uncached_tokens,
+        cache_ratio=cache_ratio,
+        request_call_count=calls,
+        export_rollout_count=len(exports),
+        categories=categories,
+    )
+    summary = report["chat_diagnostic"]
     output_dir.mkdir(parents=True, exist_ok=True)
     destination = output_dir / f"codex-token-{selected_focus}-{now.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -39,6 +39,8 @@ def _scope_dict(scope: AnalysisScope, matched_rollout_count: int) -> dict[str, o
 
 
 def _resolve_paths(args: argparse.Namespace) -> tuple[AnalysisScope, list[Path], list[Path]]:
+    if args.session and args.scope and args.scope.strip() not in {"当前会话", "这个会话"}:
+        raise ScopeError("--session 不能同时使用时间范围或“全部历史”；请二选一。")
     current_session = args.session or os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")
     scope = resolve_scope(args.scope, session_id=current_session, now=datetime.now(timezone.utc))
     rollout_paths = filter_rollout_paths(discover_rollouts(Path(args.sessions_root)), scope)

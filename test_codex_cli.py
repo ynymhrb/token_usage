@@ -56,6 +56,17 @@ class CodexCliTests(unittest.TestCase):
         self.assertEqual(report["analysis_scope"]["description"], "用户指定时间：2026-11-02 18:00 至 2026-11-02 20:00")
         self.assertEqual(report["analysis_scope"]["matched_rollout_count"], 1)
 
+    def test_explicit_session_rejects_time_or_all_history_scope(self):
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            code = main([
+                "analyze", "--sessions-root", "tests/fixtures/codex", "--session", "thread-123",
+                "--scope", "全部历史",
+            ])
+
+        self.assertEqual(code, 2)
+        self.assertIn("不能同时", errors.getvalue())
+
     def test_recommend_rejects_raw_jsonl(self):
         output = io.StringIO()
         with redirect_stdout(output):

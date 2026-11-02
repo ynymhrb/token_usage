@@ -8,6 +8,20 @@ from pathlib import Path
 
 
 class PluginPackageTests(unittest.TestCase):
+    def test_plugin_ships_codex_usage_analyze_skill(self):
+        skill = Path("codex-context-optimizer/skills/usage-analyze/SKILL.md")
+
+        text = skill.read_text(encoding="utf-8")
+
+        self.assertIn("name: usage-analyze", text)
+        self.assertIn("token_analyzer", text)
+        self.assertIn("analyze", text)
+        self.assertIn("默认分析当前会话", text)
+        self.assertIn("scope", text)
+        self.assertIn("今天", text)
+        self.assertNotIn("claude_session_token_profiler", text)
+        self.assertNotIn("statusLine", text)
+
     def test_plugin_registers_local_mcp_and_compaction_hook(self):
         root = Path("codex-context-optimizer")
         manifest = json.loads((root / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))

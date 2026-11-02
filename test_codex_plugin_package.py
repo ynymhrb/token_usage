@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from shutil import copytree
 
 
 class PluginPackageTests(unittest.TestCase):
@@ -34,9 +35,38 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("context_optimizer", mcp["mcpServers"])
         self.assertTrue(mcp["mcpServers"]["context_optimizer"]["enabled"])
         self.assertTrue(mcp["mcpServers"]["token_analyzer"]["enabled"])
+        self.assertEqual(mcp["mcpServers"]["context_optimizer"]["command"], "py")
+        self.assertEqual(mcp["mcpServers"]["token_analyzer"]["command"], "py")
+        self.assertEqual(mcp["mcpServers"]["context_optimizer"]["cwd"], ".")
+        self.assertEqual(mcp["mcpServers"]["token_analyzer"]["cwd"], ".")
         self.assertEqual(mcp["mcpServers"]["token_analyzer"]["default_tools_approval_mode"], "approve")
+        self.assertEqual(mcp["mcpServers"]["context_optimizer"]["env_vars"], ["CODEX_HOME", "PATH"])
+        self.assertEqual(mcp["mcpServers"]["token_analyzer"]["env_vars"], ["CODEX_HOME", "PATH"])
         self.assertIn("PreCompact", hooks["hooks"])
         self.assertIn("${PLUGIN_ROOT}", hooks["hooks"]["PreCompact"][0]["hooks"][0]["command"])
+
+    def test_mcp_servers_start_from_a_copied_plugin_cache(self):
+        root = Path("codex-context-optimizer")
+        request = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
+        }) + "\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            codex_home = Path(temporary, ".codex")
+            cache_root = codex_home / "plugins" / "cache" / "token-usage-local" / "codex-context-optimizer" / "0.1.9"
+            copytree(root, cache_root)
+            mcp = json.loads((cache_root / ".mcp.json").read_text(encoding="utf-8"))
+            for name, expected_server_name in (("context_optimizer", "codex-context-optimizer"), ("token_analyzer", "token-analyzer")):
+                server = mcp["mcpServers"][name]
+                completed = subprocess.run(
+                    [server["command"], *server["args"]], input=request, text=True, capture_output=True,
+                    cwd=cache_root / server["cwd"], env=(os.environ | {"CODEX_HOME": str(codex_home)}), check=True,
+                )
+                response = json.loads(completed.stdout)
+                self.assertEqual(response["result"]["serverInfo"]["name"], expected_server_name)
+                self.assertEqual(response["result"]["protocolVersion"], "2025-11-25")
 
     def test_repo_marketplace_exposes_the_plugin(self):
         marketplace = json.loads(Path(".agents/plugins/marketplace.json").read_text(encoding="utf-8"))

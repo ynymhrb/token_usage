@@ -1,15 +1,25 @@
 {
   "mcpServers": {
     "context_optimizer": {
-      "command": "python",
-      "args": ["${PLUGIN_ROOT}/scripts/mcp_server.py"],
+      "command": "py",
+      "args": [
+        "-3",
+        "scripts/mcp_server.py"
+      ],
+      "cwd": ".",
       "enabled": true,
+      "env_vars": ["CODEX_HOME", "PATH"],
       "default_tools_approval_mode": "prompt"
     },
     "token_analyzer": {
-      "command": "python",
-      "args": ["${PLUGIN_ROOT}/scripts/token_analyzer_server.py"],
+      "command": "py",
+      "args": [
+        "-3",
+        "scripts/token_analyzer_server.py"
+      ],
+      "cwd": ".",
       "enabled": true,
+      "env_vars": ["CODEX_HOME", "PATH"],
       "default_tools_approval_mode": "approve"
     }
   }

@@ -11,15 +11,11 @@ from pathlib import Path
 from typing import Any
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
-
 # MCP stdio 是 UTF-8 JSON-RPC；Windows 控制台默认代码页不能替代协议编码。
 sys.stdin.reconfigure(encoding="utf-8")
 sys.stdout.reconfigure(encoding="utf-8")
 
-from codex_token.plugin_service import PluginAnalysisError, run_plugin_analysis
+from token_analyzer_runtime import AnalysisError, analyze
 
 
 TOOL_SCHEMA = {
@@ -58,23 +54,16 @@ def _tool_list() -> dict[str, object]:
 
 def _call(arguments: object) -> dict[str, object]:
     if not isinstance(arguments, Mapping):
-        raise PluginAnalysisError("analyze 参数必须是对象。")
+        raise AnalysisError("analyze 参数必须是对象。")
     scope = arguments.get("scope")
     focus = arguments.get("focus")
     if scope is not None and not isinstance(scope, str):
-        raise PluginAnalysisError("scope 必须是字符串。")
+        raise AnalysisError("scope 必须是字符串。")
     if focus is not None and not isinstance(focus, str):
-        raise PluginAnalysisError("focus 必须是字符串。")
+        raise AnalysisError("focus 必须是字符串。")
     sessions_root, output_dir = _paths()
     current_session_id = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")
-    result = run_plugin_analysis(
-        scope=scope,
-        focus=focus,
-        sessions_root=sessions_root,
-        output_dir=output_dir,
-        current_session_id=current_session_id,
-        now=datetime.now(timezone.utc),
-    )
+    result = analyze(scope, focus, sessions_root, output_dir, current_session_id, datetime.now(timezone.utc))
     return {"content": [{"type": "text", "text": f"{result['summary']}\n完整报告：{result['report_path']}"}]}
 
 
@@ -98,9 +87,9 @@ def _response(request: Mapping[str, Any]) -> dict[str, object]:
     if method == "tools/call":
         params = request.get("params")
         if not isinstance(params, Mapping) or params.get("name") != "analyze":
-            raise PluginAnalysisError("仅支持 analyze 工具。")
+            raise AnalysisError("仅支持 analyze 工具。")
         return {"jsonrpc": "2.0", "id": request_id, "result": _call(params.get("arguments", {}))}
-    raise PluginAnalysisError("不支持的方法。")
+    raise AnalysisError("不支持的方法。")
 
 
 def main() -> int:
@@ -108,9 +97,9 @@ def main() -> int:
         try:
             request = json.loads(line)
             if not isinstance(request, Mapping):
-                raise PluginAnalysisError("请求必须是对象。")
+                raise AnalysisError("请求必须是对象。")
             response = _response(request)
-        except PluginAnalysisError as error:
+        except AnalysisError as error:
             response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32602, "message": str(error)}}
         except (OSError, ValueError, json.JSONDecodeError):
             response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": "本地 Token 分析失败。"}}

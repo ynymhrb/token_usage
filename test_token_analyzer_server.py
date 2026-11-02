@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from shutil import copytree
 
 
 SERVER = Path(__file__).parent / "codex-context-optimizer" / "scripts" / "token_analyzer_server.py"
@@ -58,6 +59,30 @@ class TokenAnalyzerServerTests(unittest.TestCase):
         ], {})
 
         self.assertEqual(responses[0]["error"]["code"], -32602)
+
+    def test_server_runs_when_plugin_is_copied_to_an_install_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache_root = Path(temporary) / "codex-context-optimizer"
+            copytree(Path(__file__).parent / "codex-context-optimizer", cache_root)
+            root = Path(temporary) / "sessions"
+            output = Path(temporary) / "reports"
+            root.mkdir()
+            (root / "rollout-2026-11-02T12-00-00_thread-123.jsonl").write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+            global SERVER
+            original_server = SERVER
+            SERVER = cache_root / "scripts" / "token_analyzer_server.py"
+            try:
+                responses = invoke([
+                    {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "analyze", "arguments": {}}},
+                ], {
+                    "CODEX_THREAD_ID": "thread-123",
+                    "CODEX_SESSIONS_ROOT": str(root),
+                    "TOKEN_ANALYZER_OUTPUT_DIR": str(output),
+                })
+            finally:
+                SERVER = original_server
+
+        self.assertIn("result", responses[0])
 
 
 if __name__ == "__main__":

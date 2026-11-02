@@ -1,6 +1,10 @@
 # Codex Token 工具使用说明
 
-`python -m codex_token analyze --sessions-root PATH` 仅在本机读取 Codex rollout，并默认输出脱敏 JSON。
+`python -m codex_token analyze --sessions-root PATH` 仅在本机读取 Codex rollout，并默认输出脱敏紧凑摘要。
+
+现在默认范围是当前会话：命令优先读取 `CODEX_THREAD_ID`、其次读取 `CODEX_SESSION_ID`；无法取得会话标识时拒绝执行，避免误扫全部历史。可用 `--session ID` 显式指定会话，或用 `--scope` 覆盖默认范围，例如 `--scope "今天"`、`--scope "最近 2 小时"`、`--scope "2026-11-02 09:00 至 2026-11-02 18:00"`。只有 `--scope "全部历史"` 才会扫描所有本地历史。
+
+默认标准输出只有范围、匹配 rollout 数和报告路径等紧凑摘要；使用 `--output D:\\ai_tmp\\tokenUsage\\report.json` 才写入完整脱敏 JSON。`--format json` 或 `--format md` 会将完整报告输出到终端，适合人工调试，不适合直接回填给模型。
 
 `python -m codex_token recommend REPORT.json` 只读取已经脱敏的报告，拒绝原始 JSONL。
 

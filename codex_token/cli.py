@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -15,6 +16,7 @@ from .detectors import detect
 from .recommendations import recommend
 from .report import build_report, render_markdown_report, write_json_report
 from .experiments import RunResult, compare_runs, load_manifest, plan_manifest
+from .scope import AnalysisScope, ScopeError, filter_rollout_paths, resolve_scope
 
 
 def _finding_dict(finding: object) -> dict[str, object]:
@@ -25,20 +27,56 @@ def _finding_dict(finding: object) -> dict[str, object]:
     }
 
 
+def _scope_dict(scope: AnalysisScope, matched_rollout_count: int) -> dict[str, object]:
+    return {
+        "kind": scope.kind,
+        "description": scope.description,
+        "start": scope.start.isoformat() if scope.start else None,
+        "end": scope.end.isoformat() if scope.end else None,
+        "matched_rollout_count": matched_rollout_count,
+        "time_measurement": "rollout 文件名中的 UTC 起始时间" if scope.kind == "time" else None,
+    }
+
+
+def _resolve_paths(args: argparse.Namespace) -> tuple[AnalysisScope, list[Path], list[Path]]:
+    current_session = args.session or os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")
+    scope = resolve_scope(args.scope, session_id=current_session, now=datetime.now(timezone.utc))
+    rollout_paths = filter_rollout_paths(discover_rollouts(Path(args.sessions_root)), scope)
+    from .context_attribution import discover_context_exports
+    export_paths = filter_rollout_paths(discover_context_exports(Path(args.sessions_root)), scope)
+    return scope, rollout_paths, export_paths
+
+
+def _compact_summary(scope: AnalysisScope, matched_rollout_count: int, output: str | None) -> str:
+    return json.dumps({
+        "scope": _scope_dict(scope, matched_rollout_count),
+        "report_path": output,
+        "local_only": True,
+    }, ensure_ascii=False)
+
+
 def _analyze(args: argparse.Namespace) -> int:
     root = Path(args.sessions_root)
     salt = os.environ.get("CODEX_TOKEN_SALT", "codex-token-local")
-    traces = [parse_rollout(path, identifier_salt=salt) for path in discover_rollouts(root)]
+    try:
+        scope, rollout_paths, _ = _resolve_paths(args)
+    except ScopeError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    traces = [parse_rollout(path, identifier_salt=salt) for path in rollout_paths]
     findings = [finding for trace in traces for finding in detect(trace)]
     report = build_report(traces, findings)
+    report["analysis_scope"] = _scope_dict(scope, len(rollout_paths))
     recommendations = recommend(report)
     report["recommendations"] = [_finding_dict(item) for item in recommendations]
     if args.output:
         write_json_report(Path(args.output), report)
     if args.format == "md":
         print(render_markdown_report(report))
-    else:
+    elif args.format == "json":
         print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(_compact_summary(scope, len(rollout_paths), args.output))
     return 0
 
 
@@ -57,11 +95,21 @@ def _recommend(args: argparse.Namespace) -> int:
 
 
 def _context_breakdown(args: argparse.Namespace) -> int:
-    report = context_report(analyze_context_exports(Path(args.sessions_root)))
+    root = Path(args.sessions_root)
+    try:
+        scope, rollout_paths, export_paths = _resolve_paths(args)
+    except ScopeError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    report = context_report(analyze_context_exports(root, export_paths=export_paths, rollout_paths=rollout_paths))
+    report["analysis_scope"] = _scope_dict(scope, len(rollout_paths))
     rendered = json.dumps(report, ensure_ascii=False, indent=2)
     if args.output:
         write_json_report(Path(args.output), report)
-    print(rendered)
+    if args.format == "json":
+        print(rendered)
+    else:
+        print(_compact_summary(scope, len(rollout_paths), args.output))
     return 0
 
 
@@ -106,11 +154,16 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     analyze = commands.add_parser("analyze", help="只读分析本地 rollout")
     analyze.add_argument("--sessions-root", default=str(Path.home() / ".codex" / "sessions"))
-    analyze.add_argument("--format", choices=("json", "md"), default="json")
+    analyze.add_argument("--session", help="显式会话标识，优先于当前会话环境变量")
+    analyze.add_argument("--scope", help="当前会话、今天、昨天、最近 N 小时、时间范围或全部历史")
+    analyze.add_argument("--format", choices=("summary", "json", "md"), default="summary")
     analyze.add_argument("--output")
     analyze.set_defaults(handler=_analyze)
     context_breakdown = commands.add_parser("context-breakdown", help="按保存请求结构分析上下文构成")
     context_breakdown.add_argument("--sessions-root", default=str(Path.home() / ".codex" / "sessions"))
+    context_breakdown.add_argument("--session", help="显式会话标识，优先于当前会话环境变量")
+    context_breakdown.add_argument("--scope", help="当前会话、今天、昨天、最近 N 小时、时间范围或全部历史")
+    context_breakdown.add_argument("--format", choices=("summary", "json"), default="summary")
     context_breakdown.add_argument("--output")
     context_breakdown.set_defaults(handler=_context_breakdown)
     recommend_parser = commands.add_parser("recommend", help="从脱敏报告生成建议")

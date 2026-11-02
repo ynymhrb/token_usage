@@ -6,7 +6,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .adapter import discover_rollouts
 from .models import DataGap
@@ -99,13 +99,18 @@ def _classify_request(request: Mapping[str, Any]) -> Counter[str]:
     return counts
 
 
-def analyze_context_exports(root: Path) -> ContextAttribution:
+def analyze_context_exports(
+    root: Path,
+    *,
+    export_paths: Iterable[Path] | None = None,
+    rollout_paths: Iterable[Path] | None = None,
+) -> ContextAttribution:
     """汇总请求导出；坏行和缺失导出均显式转化为数据缺口。"""
     counts: Counter[str] = Counter({category: 0 for category in CATEGORY_ORDER})
     gaps: list[DataGap] = []
     call_count = 0
-    paths = discover_context_exports(root)
-    rollouts = discover_rollouts(root)
+    paths = list(export_paths) if export_paths is not None else discover_context_exports(root)
+    rollouts = list(rollout_paths) if rollout_paths is not None else discover_rollouts(root)
     rollout_keys = {
         _rollout_key(path, root, ".jsonl.zst" if path.name.endswith(".jsonl.zst") else path.suffix)
         for path in rollouts

@@ -2,26 +2,59 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from codex_token.cli import main
 
 
 class CodexCliTests(unittest.TestCase):
-    def test_analyze_reads_only_selected_root_and_hides_payload(self):
+    def test_analyze_defaults_to_current_session_and_prints_compact_summary(self):
         fixture = Path(__file__).parent / "tests" / "fixtures" / "codex" / "rollout-valid.jsonl"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "one.jsonl").write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
+            (root / "rollout-2026-11-02T19-00-00_thread-123.jsonl").write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
+            (root / "rollout-2026-11-02T11-00-00_other-thread.jsonl").write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
             output = io.StringIO()
-            with redirect_stdout(output):
+            with patch.dict("os.environ", {"CODEX_THREAD_ID": "thread-123"}, clear=False), redirect_stdout(output):
                 code = main(["analyze", "--sessions-root", str(root)])
 
         self.assertEqual(code, 0)
         rendered = output.getvalue()
         self.assertNotIn("private tool input", rendered)
-        self.assertEqual(json.loads(rendered)["facts"]["trace_count"], 1)
+        summary = json.loads(rendered)
+        self.assertEqual(summary["scope"]["matched_rollout_count"], 1)
+        self.assertEqual(summary["scope"]["description"], "当前会话")
+
+    def test_analyze_without_scope_or_current_session_rejects_history_scan(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = io.StringIO()
+            errors = io.StringIO()
+            with patch.dict("os.environ", {"CODEX_THREAD_ID": "", "CODEX_SESSION_ID": ""}, clear=False), redirect_stdout(output), redirect_stderr(errors):
+                code = main(["analyze", "--sessions-root", temporary])
+
+        self.assertEqual(code, 2)
+        self.assertIn("当前会话", errors.getvalue())
+
+    def test_scope_overrides_current_session_and_full_report_requires_output(self):
+        fixture = Path(__file__).parent / "tests" / "fixtures" / "codex" / "rollout-valid.jsonl"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            destination = root / "report.json"
+            (root / "rollout-2026-11-02T11-00-00_other-thread.jsonl").write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
+            output = io.StringIO()
+            with patch.dict("os.environ", {"CODEX_THREAD_ID": "thread-123"}, clear=False), redirect_stdout(output):
+                code = main([
+                    "analyze", "--sessions-root", str(root), "--scope", "2026-11-02 18:00 至 2026-11-02 20:00",
+                    "--output", str(destination),
+                ])
+            report = json.loads(destination.read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertNotIn("private tool input", output.getvalue())
+        self.assertEqual(report["analysis_scope"]["description"], "用户指定时间：2026-11-02 18:00 至 2026-11-02 20:00")
+        self.assertEqual(report["analysis_scope"]["matched_rollout_count"], 1)
 
     def test_recommend_rejects_raw_jsonl(self):
         output = io.StringIO()
@@ -46,7 +79,10 @@ class CodexCliTests(unittest.TestCase):
             (root / "sample.llm_calls.jsonl").write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
             output = io.StringIO()
             with redirect_stdout(output):
-                code = main(["context-breakdown", "--sessions-root", str(root), "--output", str(destination)])
+                code = main([
+                    "context-breakdown", "--sessions-root", str(root), "--scope", "全部历史",
+                    "--output", str(destination),
+                ])
 
             written = json.loads(destination.read_text(encoding="utf-8"))
 

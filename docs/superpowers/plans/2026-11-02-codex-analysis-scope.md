@@ -51,7 +51,7 @@
 - Consumes: `resolve_scope` 与 `filter_rollout_paths`。
 - Produces: `analyze` / `context-breakdown` 的范围元数据和仅含计数的标准输出摘要。
 
-- [ ] 写出默认当前会话、缺少会话标识报错、`--scope` 覆盖默认和 `--output` 写完整报告的测试。
-- [ ] 运行测试确认命令行尚不支持这些参数。
-- [ ] 实现 `--session`、`--scope`、`--output` 与范围元数据；不传 `--output` 时只输出紧凑摘要。
-- [ ] 跑完整测试集、在本地会话目录只读实机验证并提交。
+- [x] 写出默认当前会话、缺少会话标识报错、`--scope` 覆盖默认和 `--output` 写完整报告的测试。
+- [x] 运行测试确认命令行尚不支持这些参数。
+- [x] 实现 `--session`、`--scope`、`--output` 与范围元数据；不传 `--output` 时只输出紧凑摘要。
+- [x] 跑完整测试集、在本地会话目录只读实机验证并提交。

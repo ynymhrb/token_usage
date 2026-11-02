@@ -19,6 +19,9 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("默认分析当前会话", text)
         self.assertIn("scope", text)
         self.assertIn("今天", text)
+        self.assertIn("可调用工具集合", text)
+        self.assertIn("不要调用 exec", text)
+        self.assertIn("不得继续其他任务", text)
         self.assertNotIn("claude_session_token_profiler", text)
         self.assertNotIn("statusLine", text)
 

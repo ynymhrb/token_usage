@@ -28,7 +28,7 @@ only the separate shell command avoids a Skill/model invocation.
 
 When the router returns `mode: llm`, create a temporary `.json` path, then run the
 wrapper with `profiler_args` plus `--llm-package <temporary-path>`. The router
-adds `--current-five-hour` whenever no session or period selector was supplied,
+adds `--current-session` whenever no session or period selector was supplied,
 including bare `--llm` and `--llm --lang en`.
 
 Capture the profiler's stdout as `SCRIPT_STDOUT`. You must read only the compact
@@ -46,7 +46,8 @@ that deletes the temporary package on success or failure. Report failures
 without revealing the temporary path.
 
 With no arguments, the router selects `mode: llm` and
-`profiler_args: [--current-five-hour]`. For supported natural-language time intent,
+`profiler_args: [--current-session]`, which resolves only the active project's
+current Claude session. For supported natural-language time intent,
 state `mapping` before analysis only when `display_mapping` is true. The router
 rejects ambiguous or unsupported text before execution. In raw mode the mapping
 is silent, so successful output remains stdout verbatim.

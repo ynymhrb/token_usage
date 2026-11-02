@@ -59,7 +59,7 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
             "temporary",
             "--llm-package",
             "read only that package",
-            "--current-five-hour",
+            "--current-session",
             "natural language",
             "display_mapping",
             "Never read raw transcripts",
@@ -85,13 +85,13 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
         assert spec.loader is not None
         spec.loader.exec_module(module)
 
-        self.assertEqual(module.route(["--llm"])["profiler_args"], ["--current-five-hour"])
+        self.assertEqual(module.route(["--llm"])["profiler_args"], ["--current-session"])
         self.assertEqual(
             module.route(["--llm", "--lang", "en"])["profiler_args"],
-            ["--lang", "en", "--current-five-hour"],
+            ["--lang", "en", "--current-session"],
         )
         raw = module.route(["--raw", "最近一次"])
-        self.assertEqual(raw["profiler_args"], ["--current-five-hour"])
+        self.assertEqual(raw["profiler_args"], ["--current-session"])
         self.assertFalse(raw["display_mapping"])
         analyzed = module.route(["最近6小时"])
         self.assertEqual(analyzed["profiler_args"], ["--last-hours", "6"])

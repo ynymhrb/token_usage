@@ -2,11 +2,15 @@
   "mcpServers": {
     "context_optimizer": {
       "command": "python",
-      "args": ["${PLUGIN_ROOT}/scripts/mcp_server.py"]
+      "args": ["${PLUGIN_ROOT}/scripts/mcp_server.py"],
+      "enabled": true,
+      "default_tools_approval_mode": "prompt"
     },
     "token_analyzer": {
       "command": "python",
-      "args": ["${PLUGIN_ROOT}/scripts/token_analyzer_server.py"]
+      "args": ["${PLUGIN_ROOT}/scripts/token_analyzer_server.py"],
+      "enabled": true,
+      "default_tools_approval_mode": "approve"
     }
   }
 }

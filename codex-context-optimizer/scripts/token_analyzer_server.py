@@ -52,6 +52,15 @@ def _tool_list() -> dict[str, object]:
     }
 
 
+def _protocol_version(request: Mapping[str, Any]) -> str:
+    params = request.get("params")
+    if isinstance(params, Mapping):
+        client_version = params.get("protocolVersion")
+        if isinstance(client_version, str) and client_version:
+            return client_version
+    return "2025-03-26"
+
+
 def _call(arguments: object) -> dict[str, object]:
     if not isinstance(arguments, Mapping):
         raise AnalysisError("analyze 参数必须是对象。")
@@ -77,7 +86,7 @@ def _response(request: Mapping[str, Any]) -> dict[str, object]:
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "protocolVersion": "2025-03-26",
+                "protocolVersion": _protocol_version(request),
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "token-analyzer", "version": "0.1.0"},
             },

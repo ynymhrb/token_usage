@@ -27,6 +27,16 @@ def invoke(requests: list[dict[str, object]], env: dict[str, str]) -> list[dict[
 
 
 class TokenAnalyzerServerTests(unittest.TestCase):
+    def test_initialize_negotiates_the_client_protocol_version(self):
+        responses = invoke([{
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
+        }], {})
+
+        self.assertEqual(responses[0]["result"]["protocolVersion"], "2025-11-25")
+
     def test_tools_list_exposes_only_analyze(self):
         responses = invoke([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}], {})
 

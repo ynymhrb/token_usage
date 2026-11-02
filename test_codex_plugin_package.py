@@ -32,6 +32,9 @@ class PluginPackageTests(unittest.TestCase):
         hooks = json.loads((root / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "codex-context-optimizer")
         self.assertIn("context_optimizer", mcp["mcpServers"])
+        self.assertTrue(mcp["mcpServers"]["context_optimizer"]["enabled"])
+        self.assertTrue(mcp["mcpServers"]["token_analyzer"]["enabled"])
+        self.assertEqual(mcp["mcpServers"]["token_analyzer"]["default_tools_approval_mode"], "approve")
         self.assertIn("PreCompact", hooks["hooks"])
         self.assertIn("${PLUGIN_ROOT}", hooks["hooks"]["PreCompact"][0]["hooks"][0]["command"])
 
@@ -89,6 +92,19 @@ class PluginPackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             completed = subprocess.run([sys.executable, str(script)], input=notification, text=True, capture_output=True, cwd=temporary, check=True)
         self.assertEqual(completed.stdout, "")
+
+    def test_self_contained_runtime_negotiates_the_client_protocol_version(self):
+        script = Path("codex-context-optimizer/scripts/mcp_server.py").resolve()
+        request = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
+        }) + "\n"
+
+        completed = subprocess.run([sys.executable, str(script)], input=request, text=True, capture_output=True, check=True)
+
+        self.assertEqual(json.loads(completed.stdout)["result"]["protocolVersion"], "2025-11-25")
 
     def test_pre_compact_hook_reports_receipt_counts_without_raw_output(self):
         script = Path("codex-context-optimizer/hooks/pre_compact.py").resolve()

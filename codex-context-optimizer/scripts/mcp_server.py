@@ -48,7 +48,10 @@ for line in sys.stdin:
         req = json.loads(line); method = req.get("method"); params = req.get("params", {}); result = None
         if method == "notifications/initialized":
             continue
-        if method == "initialize": result = {"protocolVersion": "2025-03-26", "capabilities": {"tools": {}}, "serverInfo": {"name": "codex-context-optimizer", "version": "0.1.0"}}
+        if method == "initialize":
+            client_version = params.get("protocolVersion") if isinstance(params, dict) else None
+            protocol_version = client_version if isinstance(client_version, str) and client_version else "2025-03-26"
+            result = {"protocolVersion": protocol_version, "capabilities": {"tools": {}}, "serverInfo": {"name": "codex-context-optimizer", "version": "0.1.0"}}
         elif method == "tools/list": result = {"tools": [{"name": "run_command", "description": "运行参数数组命令并压缩输出", "inputSchema": {"type": "object"}}, {"name": "read_file", "description": "读取工作区文件并压缩内容", "inputSchema": {"type": "object"}}]}
         elif method == "tools/call" and params.get("name") == "run_command":
             command = params.get("arguments", {}).get("command", [])

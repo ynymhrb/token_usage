@@ -49,9 +49,13 @@ class TokenAnalyzerServerTests(unittest.TestCase):
 
             text = responses[0]["result"]["content"][0]["text"]
             reports = list(output.glob("*.json"))
-        self.assertIn("当前会话", text)
-        self.assertNotIn("private tool input", text)
-        self.assertEqual(len(reports), 1)
+            self.assertIn("当前会话", text)
+            self.assertIn("缓存命中", text)
+            report = json.loads(reports[0].read_text(encoding="utf-8"))
+            self.assertIn("data_gaps", report)
+            self.assertIn("请求结构导出", report["data_gaps"])
+            self.assertNotIn("private tool input", text)
+            self.assertEqual(len(reports), 1)
 
     def test_invalid_focus_returns_mcp_error_without_report(self):
         responses = invoke([

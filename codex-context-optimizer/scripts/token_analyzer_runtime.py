@@ -182,9 +182,40 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         summary = f"上下文构成：范围={scope[1]}；匹配 rollout={len(rollouts)}；最大类别={_LABELS[top]}。"
     else:
         input_tokens, output_tokens, cached_tokens, readable = _usage(rollouts)
-        report = {"analysis_scope": metadata, "facts": {"trace_count": readable, "input_tokens": input_tokens, "output_tokens": output_tokens, "cached_input_tokens": cached_tokens}}
+        uncached_tokens = max(0, input_tokens - cached_tokens)
+        cache_ratio = round(cached_tokens / input_tokens, 6) if input_tokens else None
+        calls, categories = _context(exports)
+        report = {
+            "analysis_scope": metadata,
+            "facts": {
+                "trace_count": readable,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cached_input_tokens": cached_tokens,
+                "uncached_input_tokens_difference": uncached_tokens,
+                "cache_hit_share_of_input": cache_ratio,
+            },
+        }
+        if calls:
+            total = sum(categories.values())
+            top = max(categories, key=categories.get, default="unattributable")
+            report["context_attribution"] = {
+                "saved_request_call_count": calls,
+                "measurement": "请求结构字符代理；不是精确 Token 账单",
+                "top_category": {"category": top, "label": _LABELS[top], "share": round(categories[top] / total, 6) if total else None},
+                "categories": dict(categories),
+            }
+            attribution_line = f"请求结构归因：最大类别={_LABELS[top]}。"
+        else:
+            report["data_gaps"] = "未找到当前范围的请求结构导出；无法将输入 Token 归因到系统提示、Skill、消息或工具结果。"
+            attribution_line = "归因缺口：未保存请求结构，无法区分系统提示、Skill、消息和工具结果。"
         label = "工具相关 Token 概览" if selected_focus == "tools" else "Token 概览"
-        summary = f"{label}：范围={scope[1]}；匹配 rollout={len(rollouts)}；可读 trace={readable}；输入 Token={input_tokens}。"
+        cache_percent = f"{cache_ratio * 100:.1f}%" if cache_ratio is not None else "未知"
+        summary = (
+            f"{label}：范围={scope[1]}；可读 trace={readable}。\n"
+            f"输入={input_tokens:,}；其中缓存命中={cached_tokens:,}（{cache_percent}），非缓存差额={uncached_tokens:,}；输出={output_tokens:,}。\n"
+            f"{attribution_line}"
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     destination = output_dir / f"codex-token-{selected_focus}-{now.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -20,7 +20,7 @@ def invoke(requests: list[dict[str, object]], env: dict[str, str]) -> list[dict[
         text=True,
         encoding="utf-8",
         capture_output=True,
-        env={**os.environ, **env},
+        env={**os.environ, 'TOKEN_ANALYZER_ACCOUNT_QUERY': '0', **env},
         check=False,
     )
     return [json.loads(line) for line in completed.stdout.splitlines() if line]

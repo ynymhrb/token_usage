@@ -248,7 +248,7 @@ def _diagnostic_markdown(
         lines.append("- 已提供本地保存内容的分类与 Token 估算；缺少逐次完整请求，因此无法计算这些内容在实际请求中被重复携带多少次、分别贡献多少输入 Token。补齐需要额外采集逐次请求，无法仅靠现有历史记录恢复。")
     lines.extend([
         "- 已拆分可识别的 Skill 与 AGENTS 显式区块；未标注来源、混合存储或未记录的指令仍不能精确拆分。需要带来源标记的指令采集才能补齐。",
-        "- 账户额度可由官方 /status 或 account/rateLimits/read 查询；account/usage/read 在支持时可返回会话估算积分/金额，空值不是零，也不是实际账单。本报告未自动查询账户接口。",
+        "- 账户额度及官方估算见报告末尾的“官方账户用量”；空值不是零，估算不是实际账单。",
         "- 官方 contextCompaction 事件可表明发生过压缩，但不提供服务端内部压缩明细；不能用本地 Token 数反推这些细节。",
     ])
     return "\n".join(lines)

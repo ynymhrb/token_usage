@@ -1,10 +1,11 @@
-"""聊天窗 Token 分析 MCP 服务，只调用本地分析器。"""
+"""聊天窗 Token 分析 MCP 服务，聚合本地记录与官方账户查询。"""
 
 from __future__ import annotations
 
 import json
 import os
 import sys
+import subprocess
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ sys.stdin.reconfigure(encoding="utf-8")
 sys.stdout.reconfigure(encoding="utf-8")
 
 from token_analyzer_runtime import AnalysisError, analyze
+from account_usage import query_account, render_account
 
 
 TOOL_SCHEMA = {
@@ -44,7 +46,7 @@ def _tool_list() -> dict[str, object]:
     return {
         "tools": [{
             "name": "analyze",
-            "description": "本地分析 Codex Token；默认当前会话，直接返回完整诊断，不写入报告文件。",
+            "description": "分析本地 Codex Token 并自动查询官方账户额度；默认当前会话，直接返回完整诊断，不写入报告文件。",
             "inputSchema": TOOL_SCHEMA,
         }],
     }
@@ -71,6 +73,15 @@ def _call(arguments: object) -> dict[str, object]:
     sessions_root = _sessions_root()
     current_session_id = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")
     result = analyze(scope, focus, sessions_root, current_session_id, datetime.now(timezone.utc))
+    account_session = current_session_id if scope is None or scope.strip() in {'', '当前会话', '这个会话'} else None
+    if os.environ.get('TOKEN_ANALYZER_ACCOUNT_QUERY', '1') == '0':
+        account_text = '## 官方账户用量\n\n账户查询已通过环境配置关闭。'
+    else:
+        try:
+            account_text = render_account(query_account(account_session))
+        except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
+            account_text = '## 官方账户用量\n\n官方账户查询或响应解析失败；本地分析仍有效，未取得的数据不代表零。'
+    result['summary'] += '\n\n' + account_text
     return {"content": [{"type": "text", "text": result["summary"]}]}
 
 

@@ -43,7 +43,7 @@ class TokenAnalyzerServerTests(unittest.TestCase):
         tools = responses[0]["result"]["tools"]
         self.assertEqual([tool["name"] for tool in tools], ["analyze"])
 
-    def test_analyze_returns_compact_summary_and_writes_fixed_report(self):
+    def test_analyze_returns_full_chat_diagnostic_without_writing_a_report(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "sessions"
             output = Path(temporary) / "reports"
@@ -58,7 +58,6 @@ class TokenAnalyzerServerTests(unittest.TestCase):
             })
 
             text = responses[0]["result"]["content"][0]["text"]
-            reports = list(output.glob("*.json"))
             self.assertIn("# Codex 上下文与 Token 诊断", text)
             self.assertIn("## 结论", text)
             self.assertIn("## 覆盖率与可信度", text)
@@ -66,11 +65,10 @@ class TokenAnalyzerServerTests(unittest.TestCase):
             self.assertIn("## 上下文构成", text)
             self.assertIn("## 数据缺口", text)
             self.assertIn("缓存命中", text)
-            report = json.loads(reports[0].read_text(encoding="utf-8"))
-            self.assertIn("data_gaps", report)
-            self.assertIn("请求结构导出", report["data_gaps"])
             self.assertNotIn("private tool input", text)
-            self.assertEqual(len(reports), 1)
+            self.assertNotIn("完整报告", text)
+            self.assertNotIn("脱敏报告", text)
+            self.assertFalse(output.exists())
 
     def test_invalid_focus_returns_mcp_error_without_report(self):
         responses = invoke([

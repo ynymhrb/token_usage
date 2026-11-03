@@ -269,7 +269,7 @@ def _diagnostic_markdown(
     return "\n".join(lines)
 
 
-def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path, output_dir: Path, current_session_id: str | None, now: datetime) -> dict[str, object]:
+def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path, current_session_id: str | None, now: datetime) -> dict[str, object]:
     selected_focus = (focus or "full").lower()
     if selected_focus not in {"full", "context", "tools"}:
         raise AnalysisError("focus 必须是 full、context 或 tools。")
@@ -281,29 +281,7 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
     uncached_tokens = max(0, input_tokens - cached_tokens)
     cache_ratio = round(cached_tokens / input_tokens, 6) if input_tokens else None
     calls, categories = _context(exports)
-    report: dict[str, object] = {
-        "analysis_scope": metadata,
-        "facts": {
-            "trace_count": readable,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cached_input_tokens": cached_tokens,
-            "uncached_input_tokens_difference": uncached_tokens,
-            "cache_hit_share_of_input": cache_ratio,
-        },
-    }
-    if calls:
-        total = sum(categories.values())
-        top = max(categories, key=categories.get, default="unattributable")
-        report["context_attribution"] = {
-            "saved_request_call_count": calls,
-            "measurement": "请求结构字符代理；不是精确 Token 账单",
-            "top_category": {"category": top, "label": _LABELS[top], "share": round(categories[top] / total, 6) if total else None},
-            "categories": dict(categories),
-        }
-    else:
-        report["data_gaps"] = "未找到当前范围的请求结构导出；无法将输入 Token 归因到系统提示、Skill、消息或工具结果。"
-    report["chat_diagnostic"] = _diagnostic_markdown(
+    diagnostic = _diagnostic_markdown(
         scope_description=scope[1],
         rollout_count=len(rollouts),
         readable_trace_count=readable,
@@ -316,8 +294,4 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         export_rollout_count=len(exports),
         categories=categories,
     )
-    summary = report["chat_diagnostic"]
-    output_dir.mkdir(parents=True, exist_ok=True)
-    destination = output_dir / f"codex-token-{selected_focus}-{now.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
-    destination.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"summary": summary, "report_path": str(destination)}
+    return {"summary": diagnostic}

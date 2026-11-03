@@ -33,15 +33,18 @@ class PluginPackageTests(unittest.TestCase):
         hooks = json.loads((root / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "codex-context-optimizer")
         self.assertIn("context_optimizer", mcp["mcpServers"])
-        self.assertTrue(mcp["mcpServers"]["context_optimizer"]["enabled"])
+        self.assertFalse(mcp["mcpServers"]["context_optimizer"]["enabled"])
         self.assertTrue(mcp["mcpServers"]["token_analyzer"]["enabled"])
-        self.assertEqual(mcp["mcpServers"]["context_optimizer"]["command"], "py")
-        self.assertEqual(mcp["mcpServers"]["token_analyzer"]["command"], "py")
+        self.assertTrue(mcp["mcpServers"]["context_optimizer"]["command"].endswith("python.exe"))
+        self.assertTrue(mcp["mcpServers"]["token_analyzer"]["command"].endswith("python.exe"))
         self.assertEqual(mcp["mcpServers"]["context_optimizer"]["cwd"], ".")
         self.assertEqual(mcp["mcpServers"]["token_analyzer"]["cwd"], ".")
         self.assertEqual(mcp["mcpServers"]["token_analyzer"]["default_tools_approval_mode"], "approve")
         self.assertEqual(mcp["mcpServers"]["context_optimizer"]["env_vars"], ["CODEX_HOME", "PATH"])
-        self.assertEqual(mcp["mcpServers"]["token_analyzer"]["env_vars"], ["CODEX_HOME", "PATH"])
+        self.assertEqual(
+            mcp["mcpServers"]["token_analyzer"]["env_vars"],
+            ["CODEX_HOME", "PATH", "SYSTEMROOT", "WINDIR", "USERPROFILE", "LOCALAPPDATA"],
+        )
         self.assertIn("PreCompact", hooks["hooks"])
         self.assertIn("${PLUGIN_ROOT}", hooks["hooks"]["PreCompact"][0]["hooks"][0]["command"])
 

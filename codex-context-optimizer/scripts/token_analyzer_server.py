@@ -35,18 +35,16 @@ TOOL_SCHEMA = {
 }
 
 
-def _paths() -> tuple[Path, Path]:
+def _sessions_root() -> Path:
     codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
-    sessions_root = Path(os.environ.get("CODEX_SESSIONS_ROOT", codex_home / "sessions"))
-    output_dir = Path(os.environ.get("TOKEN_ANALYZER_OUTPUT_DIR", r"D:\ai_tmp\tokenUsage"))
-    return sessions_root, output_dir
+    return Path(os.environ.get("CODEX_SESSIONS_ROOT", codex_home / "sessions"))
 
 
 def _tool_list() -> dict[str, object]:
     return {
         "tools": [{
             "name": "analyze",
-            "description": "本地分析 Codex Token；默认当前会话，返回紧凑摘要和脱敏报告路径。",
+            "description": "本地分析 Codex Token；默认当前会话，直接返回完整诊断，不写入报告文件。",
             "inputSchema": TOOL_SCHEMA,
         }],
     }
@@ -70,10 +68,10 @@ def _call(arguments: object) -> dict[str, object]:
         raise AnalysisError("scope 必须是字符串。")
     if focus is not None and not isinstance(focus, str):
         raise AnalysisError("focus 必须是字符串。")
-    sessions_root, output_dir = _paths()
+    sessions_root = _sessions_root()
     current_session_id = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")
-    result = analyze(scope, focus, sessions_root, output_dir, current_session_id, datetime.now(timezone.utc))
-    return {"content": [{"type": "text", "text": f"{result['summary']}\n完整报告：{result['report_path']}"}]}
+    result = analyze(scope, focus, sessions_root, current_session_id, datetime.now(timezone.utc))
+    return {"content": [{"type": "text", "text": result["summary"]}]}
 
 
 def _response(request: Mapping[str, Any]) -> dict[str, object]:

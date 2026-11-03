@@ -17,7 +17,6 @@
       ],
       "cwd": ".",
       "enabled": true,
-      "env_vars": ["CODEX_HOME", "PATH", "SYSTEMROOT", "WINDIR", "USERPROFILE", "LOCALAPPDATA"],
       "default_tools_approval_mode": "approve"
     }
   }

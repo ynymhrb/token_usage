@@ -20,9 +20,11 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("默认分析当前会话", text)
         self.assertIn("scope", text)
         self.assertIn("今天", text)
-        self.assertIn("可调用工具集合", text)
-        self.assertIn("不要调用 exec", text)
-        self.assertIn("不得继续其他任务", text)
+        self.assertIn("尝试调用", text)
+        self.assertIn("兜底脚本", text)
+        self.assertIn("兜底脚本都失败", text)
+        self.assertIn("usage_analyze_chat.py", text)
+        self.assertTrue(Path("codex-context-optimizer/skills/usage-analyze/scripts/usage_analyze_chat.py").is_file())
         self.assertNotIn("claude_session_token_profiler", text)
         self.assertNotIn("statusLine", text)
 
@@ -41,10 +43,7 @@ class PluginPackageTests(unittest.TestCase):
         self.assertEqual(mcp["mcpServers"]["token_analyzer"]["cwd"], ".")
         self.assertEqual(mcp["mcpServers"]["token_analyzer"]["default_tools_approval_mode"], "approve")
         self.assertEqual(mcp["mcpServers"]["context_optimizer"]["env_vars"], ["CODEX_HOME", "PATH"])
-        self.assertEqual(
-            mcp["mcpServers"]["token_analyzer"]["env_vars"],
-            ["CODEX_HOME", "PATH", "SYSTEMROOT", "WINDIR", "USERPROFILE", "LOCALAPPDATA"],
-        )
+        self.assertNotIn("env_vars", mcp["mcpServers"]["token_analyzer"])
         self.assertIn("PreCompact", hooks["hooks"])
         self.assertIn("${PLUGIN_ROOT}", hooks["hooks"]["PreCompact"][0]["hooks"][0]["command"])
 

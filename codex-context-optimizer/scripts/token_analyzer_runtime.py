@@ -206,6 +206,7 @@ def _diagnostic_markdown(
     request_call_count: int,
     export_rollout_count: int,
     categories: Counter[str],
+    session_count: int = 0,
 ) -> str:
     """生成聊天窗可读诊断；未知数据显式保留为缺口。"""
     cache_percent = f"{cache_ratio * 100:.1f}%" if cache_ratio is not None else "不可得"
@@ -213,7 +214,7 @@ def _diagnostic_markdown(
     lines = [
         "# Codex 上下文与 Token 诊断", "",
         "## 结论", "",
-        f"- 分析范围：{scope_description}；发现 {rollout_count} 个 rollout，可读 trace {readable_trace_count} 个。",
+        f"- 分析范围：{scope_description}；有用量记录的会话 {session_count} 个，涉及 {rollout_count} 份会话记录文件，其中 {readable_trace_count} 份包含有效用量。",
         f"- 输入 Token {input_tokens:,}；缓存命中 {cached_tokens:,}（{cache_percent}）；非缓存差额 {uncached_tokens:,}；输出 Token {output_tokens:,}。",
     ]
     observed_category_characters = sum(categories.values())
@@ -229,11 +230,12 @@ def _diagnostic_markdown(
         "", "## 覆盖率与可信度", "",
         "| 项目 | 数值 | 可信度 | 含义 |",
         "|---|---:|---|---|",
-        f"| 发现的 rollout | {rollout_count} | 精确 | 当前范围内的本地文件数 |",
-        f"| 有 Token 使用记录的 trace | {readable_trace_count} | 精确 | 可汇总输入、输出和缓存字段 |",
-        f"| 有完整请求结构的 rollout | {coverage} | 精确 | 可做上下文类别归因的覆盖量 |",
+        f"| 有用量记录的会话 | {session_count} | 精确 | 按用量记录中的会话标识分组；标识缺失时按文件分别统计 |",
+        f"| 会话记录文件 | {rollout_count} | 精确 | 当前范围内的本地文件数，同一会话可能有多份文件 |",
+        f"| 含有效用量的文件 | {readable_trace_count} | 精确 | 可汇总输入、输出和缓存字段 |",
+        f"| 完整请求样本文件 / 会话记录文件 | {coverage} | 精确 | 两类文件数量对照，不等于已匹配会话覆盖率 |",
         f"| 有完整请求结构的调用 | {request_call_count} | 精确 | 类别分析样本 |",
-        "| 上下文类别结论 | 样本级 | 有限 | 不代表未保存请求结构的 rollout |",
+        "| 上下文类别结论 | 样本级 | 有限 | 已保存内容分类不代表完整请求占比 |",
         "", "## 精确 Token 总览", "",
         "| 指标 | Token | 说明 |",
         "|---|---:|---|",
@@ -266,14 +268,14 @@ def _diagnostic_markdown(
         "", "## 数据缺口", "",
     ])
     if request_call_count and observed_category_characters:
-        lines.append(f"- 请求结构仅覆盖 {coverage} 个 rollout；类别比例只代表该样本。")
+        lines.append(f"- 完整请求样本文件 / 会话记录文件为 {coverage}；类别比例只代表已保存请求样本，不能推广到全部会话。")
     elif request_call_count:
-        lines.append(f"- 已保存请求结构覆盖 {coverage} 个 rollout，但内容为空或没有可分类字段，无法做来源归因。")
+        lines.append(f"- 完整请求样本文件 / 会话记录文件为 {coverage}，但请求内容为空或没有可分类字段，无法做请求级来源归因。")
     else:
-        lines.append(f"- 当前范围未找到带有效范围信息的完整请求结构，无法计算系统提示、Skill、消息和工具结果的请求 Token 占比；已保存的工具返回仍可按字符统计。")
+        lines.append("- 已提供本地保存内容的分类与 Token 估算；缺少逐次完整请求，因此无法计算这些内容在实际请求中被重复携带多少次、分别贡献多少输入 Token。补齐需要额外采集逐次请求，无法仅靠现有历史记录恢复。")
     lines.extend([
-        "- 静态指令为合并字段，不能精确拆成系统提示、AGENTS 和 Skill 各自占用。",
-        "- 本地记录不能推出订阅额度、真实计费或服务端压缩细节。",
+        "- 已拆分可识别的 Skill 与 AGENTS 显式区块；未标注来源、混合存储或未记录的指令仍不能精确拆分。需要带来源标记的指令采集才能补齐。",
+        "- 订阅额度扣减、真实费用及服务端压缩细节需要服务方对应数据；不能从本地 Token 数反推。它们不影响本报告对可见内容的优化诊断。",
     ])
     return "\n".join(lines)
 
@@ -310,6 +312,7 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         request_call_count=calls,
         export_rollout_count=export_count,
         categories=categories,
+        session_count=len(groups['会话']),
     )
     start = diagnostic.index('## 工具结果细分')
     end = diagnostic.index('## 可执行优化建议')

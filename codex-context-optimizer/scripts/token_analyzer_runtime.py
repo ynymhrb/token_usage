@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 from zoneinfo import ZoneInfo
 from record_analysis import inspect_records, render_details
+from content_analysis import load_titles, render_content
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -252,7 +253,7 @@ def _diagnostic_markdown(
             share_text = f"{share:.1%}" if share is not None else "不可得"
             lines.append(f"| {_LABELS[key]} | {share_text} | 请求结构字符代理 | {action} |")
     else:
-        lines.append("当前范围没有完整请求结构导出；类别表不可得，不能据此给出来源排序。")
+        lines.append("完整请求级类别表不可得；下方仍可统计已保存内容的分类，不将它冒充完整请求上下文占比。")
     lines.extend([
         "", "## 工具结果细分", "",
         "当前本地导出尚未保存工具调用名称与结果的一对一归因表；不能诚实地拆成命令、文件、网页或子代理类别。",
@@ -288,7 +289,8 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
     exports = _exports(sessions_root)
     if scope[0] == 'session':
         exports = _select(exports, scope)
-    totals, groups, tool_rows, observed, readable, missing_time, malformed = inspect_records(rollouts, scope)
+    contents = defaultdict(list)
+    totals, groups, tool_rows, observed, readable, missing_time, malformed = inspect_records(rollouts, scope, contents)
     input_tokens = totals['input_tokens']
     output_tokens = totals['output_tokens']
     cached_tokens = totals['cached_input_tokens']
@@ -311,5 +313,5 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
     )
     start = diagnostic.index('## 工具结果细分')
     end = diagnostic.index('## 可执行优化建议')
-    diagnostic = diagnostic[:start] + render_details(groups, tool_rows, missing_time, malformed) + '\n' + diagnostic[end:]
+    diagnostic = diagnostic[:start] + render_content(contents) + '\n' + render_details(groups, tool_rows, missing_time, malformed, load_titles(sessions_root.parent)) + '\n' + diagnostic[end:]
     return {"summary": diagnostic}

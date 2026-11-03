@@ -1,0 +1,159 @@
+"""对保存的内容做可复核分类；不重建服务端请求。"""
+import json
+import math
+import re
+import sqlite3
+import os
+import hashlib
+import base64
+from pathlib import Path
+from collections import Counter
+
+
+def text_of(value):
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return '\n'.join(text_of(item) for item in value)
+    if isinstance(value, dict):
+        return text_of(value.get('text', value.get('content', '')))
+    return ''
+
+
+def load_titles(root):
+    result = {}
+    named_ids = set()
+    databases = sorted(root.glob('state_*.sqlite'), key=lambda p: int(p.stem.split('_')[-1]) if p.stem.split('_')[-1].isdigit() else -1, reverse=True)
+    if databases:
+        try:
+            connection = sqlite3.connect(databases[0].as_uri() + '?mode=ro', uri=True, timeout=1)
+            try:
+                columns = {row[1] for row in connection.execute('PRAGMA table_info(threads)')}
+                query = 'SELECT id, title, name FROM threads' if 'name' in columns else 'SELECT id, title, NULL FROM threads'
+                for key, title, name in connection.execute(query):
+                    if name or title:
+                        result[key] = name or title
+                    if name:
+                        named_ids.add(key)
+            finally:
+                connection.close()
+        except (sqlite3.Error, ValueError):
+            pass
+    try:
+        for line in (root / 'session_index.jsonl').read_text(encoding='utf-8').splitlines():
+            try:
+                row = json.loads(line)
+                if row.get('id') and row.get('thread_name'):
+                    if row['id'] not in named_ids:
+                        result[row['id']] = row['thread_name']
+            except (ValueError, AttributeError):
+                continue
+    except (OSError, UnicodeError):
+        pass
+    return result
+
+
+def command_category(command):
+    """只推断明确的命令类型，无法拆分的混合命令保留混合类别。"""
+    categories = set()
+    patterns = {
+        'Git': r'\bgit\s+',
+        '文件读取与搜索': r'\b(?:Get-Content|Get-ChildItem|rg|cat|head|tail)\b',
+        '测试与构建日志': r'\b(?:pytest|unittest|npm\s+test|cargo\s+test|build)\b',
+        '网络请求': r'\b(?:curl|Invoke-WebRequest|wget)\b',
+    }
+    for name, pattern in patterns.items():
+        if re.search(pattern, command, re.I):
+            categories.add(name)
+    return next(iter(categories)) if len(categories) == 1 else ('混合命令输出' if categories else '命令执行与日志')
+
+
+def infer_tool(call, classify):
+    name = str(call.get('name', '未关联工具'))
+    raw = call.get('input', call.get('arguments', ''))
+    source = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+    if name.rsplit('.', 1)[-1] not in {'exec', 'exec_command', 'run_command'}:
+        return classify(name)
+    if name.rsplit('.', 1)[-1] in {'exec_command', 'run_command'}:
+        try:
+            args = json.loads(source)
+            return command_category(str(args.get('cmd', args.get('command', ''))))
+        except (ValueError, AttributeError):
+            return classify(name)
+    inner = re.findall(r'\btools\.([A-Za-z_][A-Za-z_0-9]*)\s*\(', source)
+    categories = set()
+    for tool in inner:
+        if tool in {'exec_command', 'run_command'}:
+            # 字符串命令只能作为类型线索，不据此猜测各内层结果大小。
+            categories.add(command_category(source))
+        elif tool == 'apply_patch':
+            categories.add('文件修改')
+        else:
+            categories.add(classify(tool))
+    if not categories:
+        return '动态调用或组合工具（未能细分）'
+    return next(iter(categories)) + '（按调用代码推断）' if len(categories) == 1 else '多类工具混合返回'
+
+
+def collect_content(record, counts):
+    payload = record.get('payload', {})
+    kind = record.get('type')
+    if kind == 'session_meta':
+        body = text_of(payload.get('base_instructions', ''))
+        if body:
+            counts['基础指令'].append(body)
+    if kind != 'response_item':
+        return
+    item_type = payload.get('type', '')
+    if item_type == 'message':
+        body = text_of(payload.get('content', ''))
+        for tag, category in [('skills_instructions', 'Skill 说明'), ('INSTRUCTIONS', 'AGENTS 与工作区规则')]:
+            pattern = rf'<{tag}>[\s\S]*?</{tag}>'
+            for match in re.findall(pattern, body):
+                counts[category].append(match)
+            body = re.sub(pattern, '', body)
+        category = {'user': '用户消息', 'assistant': '助手消息', 'developer': '开发者指令', 'system': '系统指令'}.get(payload.get('role'), '其他消息')
+    elif item_type.endswith('_call_output'):
+        category = '工具结果'
+        value = payload.get('output', '')
+        body = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    elif item_type in {'function_call', 'custom_tool_call'}:
+        category = '工具参数与调用代码'
+        value = payload.get('input', payload.get('arguments', ''))
+        body = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    else:
+        return
+    if body:
+        counts[category].append(body)
+
+
+def render_content(contents):
+    # 无本地分词依赖时也提供显式粗估，绝不联网下载或把估算称作账单。
+    def estimate(body):
+        non_ascii = sum(ord(c) > 127 for c in body)
+        return math.ceil((len(body) - non_ascii) / 4 + non_ascii)
+    method = '粗估公式：ASCII 字符数 ÷ 4 + 非 ASCII 字符数；中文、代码等内容的误差不同。'
+    dictionary = Path(os.environ.get('TOKEN_ANALYZER_TOKENIZER', 'D:/ai_soft/tokenUsage/o200k_base.tiktoken'))
+    if dictionary.is_file():
+        try:
+            import tiktoken
+            data = dictionary.read_bytes()
+            if hashlib.sha256(data).hexdigest() != '446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d':
+                raise ValueError('本地词表校验失败')
+            # 使用固定分词规则，避免执行源码或依赖动态求值。
+            pat = r"[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n/]*|\s*[\r\n]+|\s+(?!\S)|\s+"
+            ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in data.splitlines() if line)}
+            encoder = tiktoken.Encoding('local_o200k_base', pat_str=pat, mergeable_ranks=ranks, special_tokens={})
+            estimate = lambda body: len(encoder.encode_ordinary(body))
+            method = '使用本地 o200k_base 分词计数；这是可见正文的分词估算，不保证与实际模型的分词器一致。'
+        except (ImportError, OSError, ValueError):
+            method = '本地分词器不可用；' + method
+    rows = {key: sum(estimate(body) for body in values) for key, values in contents.items()}
+    total = sum(rows.values())
+    lines = ['### 已保存内容分类（Token 估算）', '', '仅统计范围内保存的内容，每条计一次，不是当前上下文窗口快照，也不是累计输入账单。不包含不可见内容及协议开销。' + method, '', '| 类别 | 估算 Token | 占已保存内容估算量 | 字符数 |', '|---|---:|---:|---:|']
+    for key, value in sorted(rows.items(), key=lambda item: -item[1]):
+        lines.append(f'| {key} | {value:,} | {value / total:.1%} | {sum(map(len, contents[key])):,} |')
+    if not total:
+        lines.append('范围内没有可分类的已保存正文。')
+    lines.extend(['', '未出现的系统提示、Skill 正文、工具定义等不等于零；可能未记录或记录在所选时间之前。AGENTS/Skill 仅识别显式区块，无法分离的内容留在其原始消息类别中。', ''])
+    return '\n'.join(lines)

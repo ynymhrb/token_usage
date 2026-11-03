@@ -95,24 +95,36 @@ def infer_tool(call, classify):
     return next(iter(categories)) + '（按调用代码推断）' if len(categories) == 1 else '多类工具混合返回'
 
 
+def split_instructions(body, fallback, counts, allow_agents=False):
+    """只拆显式来源区块；保留区块外正文，避免重复计数。"""
+    tags = [('skills_instructions', 'Skill 说明'), ('skill', 'Skill 正文（显式标记）')]
+    if allow_agents or '# AGENTS.md instructions' in body:
+        tags.append(('INSTRUCTIONS', 'AGENTS 与工作区规则'))
+    for tag, category in tags:
+        pattern = rf'<{tag}(?:\s[^>]*)?>[\s\S]*?</{tag}>'
+        for match in re.findall(pattern, body):
+            counts[category].append(match)
+        body = re.sub(pattern, '', body)
+    if body:
+        counts[fallback].append(body)
+
+
 def collect_content(record, counts):
     payload = record.get('payload', {})
     kind = record.get('type')
     if kind == 'session_meta':
         body = text_of(payload.get('base_instructions', ''))
         if body:
-            counts['基础指令'].append(body)
+            split_instructions(body, '基础指令', counts, allow_agents=True)
     if kind != 'response_item':
         return
     item_type = payload.get('type', '')
     if item_type == 'message':
         body = text_of(payload.get('content', ''))
-        for tag, category in [('skills_instructions', 'Skill 说明'), ('INSTRUCTIONS', 'AGENTS 与工作区规则')]:
-            pattern = rf'<{tag}>[\s\S]*?</{tag}>'
-            for match in re.findall(pattern, body):
-                counts[category].append(match)
-            body = re.sub(pattern, '', body)
         category = {'user': '用户消息', 'assistant': '助手消息', 'developer': '开发者指令', 'system': '系统指令'}.get(payload.get('role'), '其他消息')
+        if payload.get('role') in {'developer', 'system'} or (payload.get('role') == 'user' and '# AGENTS.md instructions' in body):
+            split_instructions(body, category, counts, allow_agents=payload.get('role') in {'developer', 'system'})
+            return
     elif item_type.endswith('_call_output'):
         category = '工具结果'
         value = payload.get('output', '')
@@ -127,7 +139,7 @@ def collect_content(record, counts):
         counts[category].append(body)
 
 
-def render_content(contents):
+def render_content(contents, request_count=0):
     # 无本地分词依赖时也提供显式粗估，绝不联网下载或把估算称作账单。
     def estimate(body):
         non_ascii = sum(ord(c) > 127 for c in body)
@@ -150,9 +162,13 @@ def render_content(contents):
             method = '本地分词器不可用；' + method
     rows = {key: sum(estimate(body) for body in values) for key, values in contents.items()}
     total = sum(rows.values())
-    lines = ['### 已保存内容分类（Token 估算）', '', '仅统计范围内保存的内容，每条计一次，不是当前上下文窗口快照，也不是累计输入账单。不包含不可见内容及协议开销。' + method, '', '| 类别 | 估算 Token | 占已保存内容估算量 | 字符数 |', '|---|---:|---:|---:|']
+    title = '### 请求样本分类（Token 估算）' if request_count else '### 已保存内容分类（Token 估算）'
+    basis = f'来自 {request_count} 次已保存请求；同一内容在不同请求出现时分别计数。占比仅代表这些请求样本，不代表全部会话或服务方计费。' if request_count else '仅统计范围内保存的内容，每条计一次，不是当前上下文窗口快照，也不是累计输入账单。'
+    lines = [title, '', basis + '不包含不可见内容及协议开销。' + method, '', '| 类别 | 估算 Token | 占分类内容估算量 | 字符数 | 来源依据 |', '|---|---:|---:|---:|---|']
+    sources = {'基础指令': '基础指令字段', '请求顶层指令': 'request.instructions', '工具定义': 'request.tools / persisted_dynamic_tools', '系统指令': 'system 角色', '开发者指令': 'developer 角色', 'Skill 说明': 'skills_instructions 显式区块', 'Skill 正文（显式标记）': 'skill 显式区块', 'AGENTS 与工作区规则': '规则消息中的 INSTRUCTIONS 区块', '工具结果': '调用返回记录', '工具参数与调用代码': '调用参数字段', '用户消息': 'user 角色', '助手消息': 'assistant 角色'}
     for key, value in sorted(rows.items(), key=lambda item: -item[1]):
-        lines.append(f'| {key} | {value:,} | {value / total:.1%} | {sum(map(len, contents[key])):,} |')
+        share = f'{value / total:.1%}' if total else '不可得'
+        lines.append(f'| {key} | {value:,} | {share} | {sum(map(len, contents[key])):,} | {sources.get(key, "未识别结构，保留原类别")} |')
     if not total:
         lines.append('范围内没有可分类的已保存正文。')
     lines.extend(['', '未出现的系统提示、Skill 正文、工具定义等不等于零；可能未记录或记录在所选时间之前。AGENTS/Skill 仅识别显式区块，无法分离的内容留在其原始消息类别中。', ''])

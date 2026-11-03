@@ -12,6 +12,7 @@ from typing import Iterable
 from zoneinfo import ZoneInfo
 from record_analysis import inspect_records, render_details
 from content_analysis import load_titles, render_content
+from request_analysis import inspect_requests
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -140,38 +141,10 @@ def _category(item: dict[str, object]) -> str:
 
 def _context(paths: Iterable[Path], scope=None) -> tuple[int, Counter[str]]:
     counts: Counter[str] = Counter({key: 0 for key in _CATEGORIES})
-    calls = 0
-    for path in paths:
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError):
-            continue
-        for line in lines:
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            request = record.get("request") if isinstance(record, dict) else None
-            if not isinstance(request, dict):
-                continue
-            if scope and scope[0] == 'time':
-                try:
-                    stamp = datetime.fromisoformat(record.get('timestamp', '').replace('Z', '+00:00'))
-                    if stamp.tzinfo is None or not scope[2] <= stamp < scope[3]:
-                        continue
-                except (ValueError, TypeError, AttributeError):
-                    continue
-            calls += 1
-            if "instructions" in request:
-                counts["static_instructions"] += len(json.dumps(request["instructions"], ensure_ascii=False, sort_keys=True))
-            if "persisted_dynamic_tools" in request:
-                counts["tool_definitions"] += len(json.dumps(request["persisted_dynamic_tools"], ensure_ascii=False, sort_keys=True))
-            items = request.get("input", [])
-            for item in items if isinstance(items, list) else [items]:
-                if isinstance(item, dict):
-                    counts[_category(item)] += len(json.dumps(item, ensure_ascii=False, sort_keys=True))
-                else:
-                    counts["unattributable"] += len(json.dumps(item, ensure_ascii=False, sort_keys=True))
+    calls, contents = inspect_requests(paths, scope or ('all', '', None, None, None))
+    mapping = {'请求顶层指令': 'static_instructions', '系统指令': 'static_instructions', '基础指令': 'static_instructions', 'Skill 说明': 'static_instructions', 'Skill 正文（显式标记）': 'static_instructions', 'AGENTS 与工作区规则': 'static_instructions', '工具定义': 'tool_definitions', '开发者指令': 'developer_messages', '用户消息': 'user_messages', '助手消息': 'assistant_history', '工具参数与调用代码': 'tool_arguments', '工具结果': 'tool_results'}
+    for category, bodies in contents.items():
+        counts[mapping.get(category, 'unattributable')] += sum(map(len, bodies))
     return calls, counts
 
 
@@ -275,7 +248,8 @@ def _diagnostic_markdown(
         lines.append("- 已提供本地保存内容的分类与 Token 估算；缺少逐次完整请求，因此无法计算这些内容在实际请求中被重复携带多少次、分别贡献多少输入 Token。补齐需要额外采集逐次请求，无法仅靠现有历史记录恢复。")
     lines.extend([
         "- 已拆分可识别的 Skill 与 AGENTS 显式区块；未标注来源、混合存储或未记录的指令仍不能精确拆分。需要带来源标记的指令采集才能补齐。",
-        "- 订阅额度扣减、真实费用及服务端压缩细节需要服务方对应数据；不能从本地 Token 数反推。它们不影响本报告对可见内容的优化诊断。",
+        "- 账户额度可由官方 /status 或 account/rateLimits/read 查询；account/usage/read 在支持时可返回会话估算积分/金额，空值不是零，也不是实际账单。本报告未自动查询账户接口。",
+        "- 官方 contextCompaction 事件可表明发生过压缩，但不提供服务端内部压缩明细；不能用本地 Token 数反推这些细节。",
     ])
     return "\n".join(lines)
 
@@ -299,6 +273,7 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
     uncached_tokens = max(0, input_tokens - cached_tokens)
     cache_ratio = round(cached_tokens / input_tokens, 6) if input_tokens else None
     calls, categories = _context(exports, scope)
+    sample_count, sample_contents = inspect_requests(exports, scope)
     export_count = sum(_context([path], scope)[0] > 0 for path in exports)
     diagnostic = _diagnostic_markdown(
         scope_description=scope[1],
@@ -316,5 +291,6 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
     )
     start = diagnostic.index('## 工具结果细分')
     end = diagnostic.index('## 可执行优化建议')
-    diagnostic = diagnostic[:start] + render_content(contents) + '\n' + render_details(groups, tool_rows, missing_time, malformed, load_titles(sessions_root.parent)) + '\n' + diagnostic[end:]
+    samples = render_content(sample_contents, request_count=sample_count) + '\n' if sample_count and sample_contents else ''
+    diagnostic = diagnostic[:start] + samples + render_content(contents) + '\n' + render_details(groups, tool_rows, missing_time, malformed, load_titles(sessions_root.parent)) + '\n' + diagnostic[end:]
     return {"summary": diagnostic}

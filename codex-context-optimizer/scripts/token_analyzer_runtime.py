@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 from zoneinfo import ZoneInfo
+from record_analysis import inspect_records, render_details
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -136,7 +137,7 @@ def _category(item: dict[str, object]) -> str:
     return "unattributable"
 
 
-def _context(paths: Iterable[Path]) -> tuple[int, Counter[str]]:
+def _context(paths: Iterable[Path], scope=None) -> tuple[int, Counter[str]]:
     counts: Counter[str] = Counter({key: 0 for key in _CATEGORIES})
     calls = 0
     for path in paths:
@@ -152,6 +153,13 @@ def _context(paths: Iterable[Path]) -> tuple[int, Counter[str]]:
             request = record.get("request") if isinstance(record, dict) else None
             if not isinstance(request, dict):
                 continue
+            if scope and scope[0] == 'time':
+                try:
+                    stamp = datetime.fromisoformat(record.get('timestamp', '').replace('Z', '+00:00'))
+                    if stamp.tzinfo is None or not scope[2] <= stamp < scope[3]:
+                        continue
+                except (ValueError, TypeError, AttributeError):
+                    continue
             calls += 1
             if "instructions" in request:
                 counts["static_instructions"] += len(json.dumps(request["instructions"], ensure_ascii=False, sort_keys=True))
@@ -261,7 +269,7 @@ def _diagnostic_markdown(
     elif request_call_count:
         lines.append(f"- 已保存请求结构覆盖 {coverage} 个 rollout，但内容为空或没有可分类字段，无法做来源归因。")
     else:
-        lines.append(f"- {rollout_count} 个 rollout 均没有对应完整请求结构，无法做系统提示、Skill、消息和工具结果归因。")
+        lines.append(f"- 当前范围未找到带有效范围信息的完整请求结构，无法计算系统提示、Skill、消息和工具结果的请求 Token 占比；已保存的工具返回仍可按字符统计。")
     lines.extend([
         "- 静态指令为合并字段，不能精确拆成系统提示、AGENTS 和 Skill 各自占用。",
         "- 本地记录不能推出订阅额度、真实计费或服务端压缩细节。",
@@ -274,16 +282,23 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
     if selected_focus not in {"full", "context", "tools"}:
         raise AnalysisError("focus 必须是 full、context 或 tools。")
     scope = _scope(scope_expression, current_session_id, now)
-    rollouts = _select(_rollouts(sessions_root), scope)
-    exports = _select(_exports(sessions_root), scope)
-    metadata = {"kind": scope[0], "description": scope[1], "matched_rollout_count": len(rollouts)}
-    input_tokens, output_tokens, cached_tokens, readable = _usage(rollouts)
+    rollouts = _rollouts(sessions_root)
+    if scope[0] == 'session':
+        rollouts = _select(rollouts, scope)
+    exports = _exports(sessions_root)
+    if scope[0] == 'session':
+        exports = _select(exports, scope)
+    totals, groups, tool_rows, observed, readable, missing_time, malformed = inspect_records(rollouts, scope)
+    input_tokens = totals['input_tokens']
+    output_tokens = totals['output_tokens']
+    cached_tokens = totals['cached_input_tokens']
     uncached_tokens = max(0, input_tokens - cached_tokens)
     cache_ratio = round(cached_tokens / input_tokens, 6) if input_tokens else None
-    calls, categories = _context(exports)
+    calls, categories = _context(exports, scope)
+    export_count = sum(_context([path], scope)[0] > 0 for path in exports)
     diagnostic = _diagnostic_markdown(
         scope_description=scope[1],
-        rollout_count=len(rollouts),
+        rollout_count=observed,
         readable_trace_count=readable,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
@@ -291,7 +306,10 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         uncached_tokens=uncached_tokens,
         cache_ratio=cache_ratio,
         request_call_count=calls,
-        export_rollout_count=len(exports),
+        export_rollout_count=export_count,
         categories=categories,
     )
+    start = diagnostic.index('## 工具结果细分')
+    end = diagnostic.index('## 可执行优化建议')
+    diagnostic = diagnostic[:start] + render_details(groups, tool_rows, missing_time, malformed) + '\n' + diagnostic[end:]
     return {"summary": diagnostic}

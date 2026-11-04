@@ -121,5 +121,11 @@ def render_details(groups, tools, missing_time, malformed, titles=None):
     if not tools:
         lines.append('未找到可统计的工具返回记录。')
     lines.extend(render_charts(groups, session_name))
-    lines.extend(['', '组合工具按调用代码推断类别；混合返回单列，不把整段输出强行分配给某一个内层工具。会话缺名时显示稳定的报告内序号；同名会话仍分别统计。', f'范围检查：{missing_time} 条记录缺少有效时间，时间范围统计时已排除；{malformed} 行 JSON 无法解析。', ''])
+    if missing_time or malformed:
+        issues = []
+        if missing_time:
+            issues.append(f'{missing_time} 条记录缺少有效时间，无法纳入时间范围统计')
+        if malformed:
+            issues.append(f'{malformed} 行记录无法解析')
+        lines.extend(['', '统计异常：' + '；'.join(issues) + '。', ''])
     return '\n'.join(lines)

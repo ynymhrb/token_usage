@@ -14,6 +14,7 @@ from record_analysis import inspect_records, render_details
 from content_analysis import load_titles, render_content
 from request_analysis import inspect_requests
 from request_comparison import render_comparison
+from native_tools import supplement_native_tools
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -247,6 +248,7 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         exports = _select(exports, scope)
     contents = defaultdict(list)
     totals, groups, tool_rows, observed, readable, missing_time, malformed = inspect_records(rollouts, scope, contents)
+    native_added, native_failed = supplement_native_tools(rollouts, scope, contents)
     input_tokens = totals['input_tokens']
     output_tokens = totals['output_tokens']
     cached_tokens = totals['cached_input_tokens']
@@ -273,5 +275,8 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
     end = diagnostic.index('## 可执行优化建议')
     samples = render_content(sample_contents, request_count=sample_count) + '\n' if sample_count and sample_contents else ''
     titles = load_titles(sessions_root.parent)
-    diagnostic = diagnostic[:start] + samples + render_content(contents) + '\n' + render_comparison(exports, rollouts, scope, titles) + '\n' + render_details(groups, tool_rows, missing_time, malformed, titles) + '\n' + diagnostic[end:]
+    native_note = f'\n{native_added} 个会话的工具定义使用当前原生默认配置补估，已计入合计；历史版本及配置可能不同。\n' if native_added else ''
+    if native_failed:
+        native_note += f'\n{native_failed} 个会话的原生工具定义补估失败，未计入合计。\n'
+    diagnostic = diagnostic[:start] + samples + render_content(contents) + native_note + '\n' + render_comparison(exports, rollouts, scope, titles) + '\n' + render_details(groups, tool_rows, missing_time, malformed, titles) + '\n' + diagnostic[end:]
     return {"summary": diagnostic}

@@ -119,6 +119,10 @@ def collect_content(record, counts):
     if kind != 'response_item':
         return
     item_type = payload.get('type', '')
+    if item_type == 'additional_tools':
+        if payload.get('tools'):
+            counts['工具定义'].append(json.dumps(payload['tools'], ensure_ascii=False, sort_keys=True))
+        return
     if item_type == 'message':
         body = text_of(payload.get('content', ''))
         category = {'user': '用户消息', 'assistant': '助手消息', 'developer': '开发者指令', 'system': '系统指令'}.get(payload.get('role'), '其他消息')
@@ -168,9 +172,13 @@ def render_content(contents, request_count=0):
     rows = {key: sum(estimate(body) for body in values) for key, values in contents.items()}
     total = sum(rows.values())
     title = '### 请求样本分类（Token 估算）' if request_count else '### 已保存内容分类（Token 估算）'
-    basis = f'来自 {request_count} 次已保存请求；同一内容在不同请求出现时分别计数。占比仅代表这些请求样本，不代表全部会话或服务方计费。' if request_count else '仅统计范围内保存的内容，每条计一次，不是当前上下文窗口快照，也不是累计输入账单。'
-    lines = [title, '', basis + '不包含不可见内容及协议开销。' + method, '', '| 类别 | 估算 Token | 占分类内容估算量 | 字符数 | 来源依据 |', '|---|---:|---:|---:|---|']
+    basis = f'来自 {request_count} 次已保存请求，按请求累计。' if request_count else '按已保存内容估算，每条内容计一次；助手消息作为后续输入历史统计。'
+    note = '基础指令可能与实际发送版本存在一定误差。' if any(key in contents for key in ('基础指令', '请求顶层指令')) else ''
+    method_note = '本地分词器不可用，使用字符粗估。' if '粗估公式' in method else ''
+    lines = [title, '', basis + note + method_note, '', '| 类别 | 估算 Token | 占分类内容估算量 | 字符数 | 来源依据 |', '|---|---:|---:|---:|---|']
     sources = {'基础指令': '基础指令字段', '请求顶层指令': 'request.instructions', '工具定义': 'request.tools / persisted_dynamic_tools', '系统指令': 'system 角色', '开发者指令': 'developer 角色', 'Skill 说明': 'skills_instructions 显式区块', 'Skill 正文（显式标记）': 'skill 显式区块', 'AGENTS 与工作区规则': '规则消息中的 INSTRUCTIONS 区块', '工具结果': '调用返回记录', '工具参数与调用代码': '调用参数字段', '用户消息': 'user 角色', '助手消息': 'assistant 角色'}
+    sources['工具定义'] = '已保存的工具声明'
+    sources['工具定义（原生补估）'] = '当前原生工具定义基线'
     for key, value in sorted(rows.items(), key=lambda item: -item[1]):
         share = f'{value / total:.1%}' if total else '不可得'
         lines.append(f'| {key} | {value:,} | {share} | {sum(map(len, contents[key])):,} | {sources.get(key, "未识别结构，保留原类别")} |')

@@ -34,8 +34,8 @@ class ContentAnalysisTests(unittest.TestCase):
         self.assertEqual(sum(len(value) for values in counts.values() for value in values), len(body))
         with patch.dict('os.environ', {'TOKEN_ANALYZER_TOKENIZER': 'Z:/missing-tokenizer'}):
             report = render_content(counts)
-        self.assertIn('粗估公式', report)
-        self.assertIn('不是当前上下文窗口快照', report)
+            self.assertIn('字符粗估', report)
+            self.assertIn('每条内容计一次', report)
 
     def test_readonly_database_titles_and_index_fallback(self):
         with tempfile.TemporaryDirectory() as d:

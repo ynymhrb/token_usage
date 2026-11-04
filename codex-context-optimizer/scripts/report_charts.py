@@ -2,6 +2,14 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+CHART_WIDTH = 960
+
+
+def chart_config():
+    """让两类图表共用宽度上限，并随聊天内容区缩放。"""
+    return ['```mermaid', '---', 'config:',
+            f'  themeCSS: "& {{ width: 100% !important; max-width: {CHART_WIDTH}px !important; height: auto; }}"']
+
 
 def chart_label(value):
     return str(value).replace('&', '＆').replace('"', '＂').replace('`', '｀').replace('<', '＜').replace('>', '＞').replace('\\', '／').replace('\n', ' ').replace('\r', ' ')
@@ -34,8 +42,8 @@ def render_charts(groups, session_name):
         period = str(start.date()) if start.date() == end.date() else f'{start.date()} 至 {end.date()}'
         lines.extend([
             f'每 {step} 小时合并一柱；横轴为时段起点，末段不足 {step} 小时按实际记录汇总。', '',
-            '```mermaid', '---', 'config:', '  themeVariables:', '    xyChart:',
-            "      plotColorPalette: '#2563eb'", '  xyChart:', '    width: 960',
+            *chart_config(), '  themeVariables:', '    xyChart:',
+            "      plotColorPalette: '#2563eb'", '  xyChart:', f'    width: {CHART_WIDTH}',
             '    xAxis:', '      labelFontSize: 12', '---', 'xychart-beta',
             f'    title "{period} 每 {step} 小时输入 Token"',
             f'    x-axis [{labels}]', f'    y-axis "输入 Token" 0 --> {max(1, max(values))}',
@@ -56,7 +64,7 @@ def render_charts(groups, session_name):
     if len(rows) > 8:
         slices.append(('其余会话（合计）', sum(row['input_tokens'] for _, row in rows[8:])))
     if sum(value for _, value in slices):
-        lines.extend(['```mermaid', 'pie showData', '    title 各会话累计输入 Token'])
+        lines.extend([*chart_config(), '  pie:', '    useMaxWidth: true', '---', 'pie showData', '    title 各会话累计输入 Token'])
         lines.extend(f'    "{chart_label(name)}" : {value}' for name, value in slices if value > 0)
         lines.extend(['```', ''])
     else:

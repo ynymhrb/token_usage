@@ -2,13 +2,19 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-CHART_WIDTH = 960
+CHART_WIDTH = 640
+PIE_WIDTH = 480
+BAR_WIDTH = 32
 
 
-def chart_config():
-    """让两类图表共用宽度上限，并随聊天内容区缩放。"""
+def chart_config(width, *, bars=False):
+    """限制图表尺寸；从柱子两侧等量裁剪，保持时间槽中心不变。"""
+    css = f'& {{ width: 100% !important; max-width: {width}px !important; height: auto; }}'
+    if bars:
+        css += (f' .bar-plot-0 rect {{ clip-path: inset(0 max(0px, '
+                f'calc((100% - {BAR_WIDTH}px) / 2))); }}')
     return ['```mermaid', '---', 'config:',
-            f'  themeCSS: "& {{ width: 100% !important; max-width: {CHART_WIDTH}px !important; height: auto; }}"']
+            f'  themeCSS: "{css}"']
 
 
 def chart_label(value):
@@ -42,9 +48,10 @@ def render_charts(groups, session_name):
         period = str(start.date()) if start.date() == end.date() else f'{start.date()} 至 {end.date()}'
         lines.extend([
             f'每 {step} 小时合并一柱；横轴为时段起点，末段不足 {step} 小时按实际记录汇总。', '',
-            *chart_config(), '  themeVariables:', '    xyChart:',
+            *chart_config(CHART_WIDTH, bars=True), '  themeVariables:', '    xyChart:',
             "      plotColorPalette: '#2563eb'", '  xyChart:', f'    width: {CHART_WIDTH}',
-            '    xAxis:', '      labelFontSize: 12', '---', 'xychart-beta',
+            '    height: 300', '    titleFontSize: 16',
+            '    xAxis:', '      labelFontSize: 10', '---', 'xychart-beta',
             f'    title "{period} 每 {step} 小时输入 Token"',
             f'    x-axis [{labels}]', f'    y-axis "输入 Token" 0 --> {max(1, max(values))}',
             f'    bar [{", ".join(str(value) for value in values)}]', '```', '',
@@ -64,7 +71,7 @@ def render_charts(groups, session_name):
     if len(rows) > 8:
         slices.append(('其余会话（合计）', sum(row['input_tokens'] for _, row in rows[8:])))
     if sum(value for _, value in slices):
-        lines.extend([*chart_config(), '  pie:', '    useMaxWidth: true', '---', 'pie showData', '    title 各会话累计输入 Token'])
+        lines.extend([*chart_config(PIE_WIDTH), '  pie:', '    useMaxWidth: true', '---', 'pie showData', '    title 各会话累计输入 Token'])
         lines.extend(f'    "{chart_label(name)}" : {value}' for name, value in slices if value > 0)
         lines.extend(['```', ''])
     else:

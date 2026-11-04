@@ -10,6 +10,16 @@ from report_charts import render_charts
 
 
 class ChartTests(unittest.TestCase):
+    def test_compact_chart_sizes_and_bar_cap(self):
+        groups = {'时间': {'2026-11-05 01:00': Counter(input_tokens=5000000)},
+                  '会话': {'a': Counter(input_tokens=5000000)}}
+        report = '\n'.join(render_charts(groups, str))
+        self.assertIn('width: 640', report)
+        self.assertIn('height: 300', report)
+        self.assertIn('max-width: 480px', report)
+        self.assertIn('clip-path: inset(0 max(0px, calc((100% - 32px) / 2)))', report)
+        self.assertNotIn('960', report)
+
     def test_adaptive_hour_bins_preserve_totals(self):
         for span in (1, 12, 13, 21, 24, 25, 168, 8761):
             with self.subTest(span=span):

@@ -200,15 +200,6 @@ def _diagnostic_markdown(
     else:
         lines.append("- 当前没有已保存请求结构，不能判断系统提示、Skill、消息或工具结果哪个占主要部分。")
     lines.extend([
-        "", "## 覆盖率与可信度", "",
-        "| 项目 | 数值 | 可信度 | 含义 |",
-        "|---|---:|---|---|",
-        f"| 有用量记录的会话 | {session_count} | 精确 | 按用量记录中的会话标识分组；标识缺失时按文件分别统计 |",
-        f"| 会话记录文件 | {rollout_count} | 精确 | 当前范围内的本地文件数，同一会话可能有多份文件 |",
-        f"| 含有效用量的文件 | {readable_trace_count} | 精确 | 可汇总输入、输出和缓存字段 |",
-        f"| 完整请求样本文件 / 会话记录文件 | {coverage} | 精确 | 两类文件数量对照，不等于已匹配会话覆盖率 |",
-        f"| 有完整请求结构的调用 | {request_call_count} | 精确 | 类别分析样本 |",
-        "| 上下文类别结论 | 样本级 | 有限 | 已保存内容分类不代表完整请求占比 |",
         "", "## 精确 Token 总览", "",
         "| 指标 | Token | 说明 |",
         "|---|---:|---|",
@@ -216,7 +207,7 @@ def _diagnostic_markdown(
         f"| 输出 Token | {output_tokens:,} | 本地 `token_usage_record` 汇总 |",
         f"| 缓存读取 Token | {cached_tokens:,} | 本地记录字段 |",
         f"| 非缓存输入差额 | {uncached_tokens:,} | 输入减缓存；不等于订阅扣减或美元成本 |",
-        "", "> 本地记录不能推出订阅额度、真实计费或服务端压缩细节。", "",
+        "",
         "## 上下文构成", "",
     ])
     if request_call_count and observed_category_characters:

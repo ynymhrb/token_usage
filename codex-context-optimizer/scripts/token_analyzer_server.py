@@ -74,14 +74,15 @@ def _call(arguments: object) -> dict[str, object]:
     current_session_id = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")
     result = analyze(scope, focus, sessions_root, current_session_id, datetime.now(timezone.utc))
     account_session = current_session_id if scope is None or scope.strip() in {'', '当前会话', '这个会话'} else None
-    if os.environ.get('TOKEN_ANALYZER_ACCOUNT_QUERY', '1') == '0':
-        account_text = '## 官方账户用量\n\n账户查询已通过环境配置关闭。'
+    if os.environ.get('TOKEN_ANALYZER_ACCOUNT_QUERY', '0') != '1':
+        account_text = ''
     else:
         try:
             account_text = render_account(query_account(account_session))
         except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
             account_text = '## 官方账户用量\n\n官方账户查询或响应解析失败；本地分析仍有效，未取得的数据不代表零。'
-    result['summary'] += '\n\n' + account_text
+    if account_text:
+        result['summary'] += '\n\n' + account_text
     return {"content": [{"type": "text", "text": result["summary"]}]}
 
 

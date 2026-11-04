@@ -51,6 +51,7 @@ class ContentAnalysisTests(unittest.TestCase):
     def test_same_titles_do_not_merge_sessions_or_expose_ids(self):
         groups = {'时间': {}, '会话': {'secret-a': Counter(input_tokens=10), 'secret-b': Counter(input_tokens=20)}, '回合': {'secret-a/turn-secret': Counter(input_tokens=10)}}
         report = render_details(groups, {}, 0, 0, {'secret-a': '同名', 'secret-b': '同名'})
-        self.assertEqual(report.count('| 同名 |'), 2)
+        self.assertIn('"同名" : 20', report)
+        self.assertIn('"同名（同名 2）" : 10', report)
         self.assertNotIn('secret', report)
-        self.assertIn('范围内第 1 回合', report)
+        self.assertNotIn('按回合', report)

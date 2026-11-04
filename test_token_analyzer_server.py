@@ -60,7 +60,9 @@ class TokenAnalyzerServerTests(unittest.TestCase):
             text = responses[0]["result"]["content"][0]["text"]
             self.assertIn("# Codex 上下文与 Token 诊断", text)
             self.assertIn("## 结论", text)
-            self.assertIn("## 覆盖率与可信度", text)
+            self.assertNotIn("## 覆盖率与可信度", text)
+            self.assertNotIn("## 官方账户用量", text)
+            self.assertNotIn("### 按回合", text)
             self.assertIn("## 精确 Token 总览", text)
             self.assertIn("## 上下文构成", text)
             self.assertNotIn("## 数据缺口", text)

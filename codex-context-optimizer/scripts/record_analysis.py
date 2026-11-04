@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from content_analysis import infer_tool, collect_content
+from report_charts import render_charts
 
 
 def inspect_records(paths, scope, contents=None):
@@ -119,20 +120,6 @@ def render_details(groups, tools, missing_time, malformed, titles=None):
         lines.append(f"| {name} | {row['calls']} | {row['characters']:,} | {share} | {row['largest']:,} |")
     if not tools:
         lines.append('未找到可统计的工具返回记录。')
-    lines.extend(['', '## 消耗排行', '', '按累计输入 Token 排序，每个维度展示前 10 项；同一上下文在多次请求中会重复计入输入。'])
-    for dimension, rows in groups.items():
-        heading = {'时间': '时间段', '会话': '会话名称', '回合': '会话名称 / 回合'}[dimension]
-        lines.extend(['', f'### 按{dimension}', '', f'| {heading} | 输入 Token | 输出 Token | 调用数 |', '|---|---:|---:|---:|'])
-        if not rows:
-            lines.append('未找到可统计的用量记录。')
-        for label, row in sorted(rows.items(), key=lambda x: -x[1]['input_tokens'])[:10]:
-            if dimension == '会话':
-                label = session_name(label)
-            elif dimension == '回合':
-                session, turn = label.split('/', 1)
-                turns = [key.split('/', 1)[1] for key in rows if key.startswith(session + '/')]
-                label = session_name(session) + ' / ' + (f'范围内第 {turns.index(turn) + 1} 回合' if turn != '回合缺失' else '回合缺失')
-            label = label.replace('|', '\\|').replace('\n', ' ')
-            lines.append(f"| {label} | {row['input_tokens']:,} | {row['output_tokens']:,} | {row['calls']} |")
+    lines.extend(render_charts(groups, session_name))
     lines.extend(['', '组合工具按调用代码推断类别；混合返回单列，不把整段输出强行分配给某一个内层工具。会话缺名时显示稳定的报告内序号；同名会话仍分别统计。', f'范围检查：{missing_time} 条记录缺少有效时间，时间范围统计时已排除；{malformed} 行 JSON 无法解析。', ''])
     return '\n'.join(lines)

@@ -4,7 +4,7 @@ import json
 from collections import Counter, defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from content_analysis import infer_tool, collect_content
+from content_analysis import infer_tool, collect_content, token_estimator
 from report_charts import render_charts
 
 
@@ -15,6 +15,7 @@ def inspect_records(paths, scope, contents=None):
     seen_usage, seen_outputs, observed, used = set(), set(), set(), set()
     missing_time = malformed = 0
     seen_content = set()
+    estimate, _ = token_estimator()
     for path in paths:
         try:
             records = []
@@ -49,9 +50,15 @@ def inspect_records(paths, scope, contents=None):
                 if not scope[2] <= stamp < scope[3]:
                     continue
             observed.add(path)
+            is_tool_output = r.get('type') == 'response_item' and str(p.get('type', '')).endswith('_call_output')
+            if is_tool_output:
+                identity = (path.stem, p.get('call_id'), json.dumps(p, sort_keys=True))
+                if identity in seen_outputs:
+                    continue
+                seen_outputs.add(identity)
             if contents is not None:
                 identity = (path.stem, p.get('id') or json.dumps(r, sort_keys=True))
-                if identity not in seen_content:
+                if is_tool_output or identity not in seen_content:
                     seen_content.add(identity)
                     collect_content(r, contents)
             if r.get('type') == 'token_usage_record':
@@ -71,18 +78,18 @@ def inspect_records(paths, scope, contents=None):
                 for dimension, label in [('时间', hour), ('会话', session), ('回合', turn)]:
                     groups[dimension][label].update(values)
                     groups[dimension][label]['calls'] += 1
-            if r.get('type') == 'response_item' and str(p.get('type', '')).endswith('_call_output'):
-                identity = (path.stem, p.get('call_id'), json.dumps(p, sort_keys=True))
-                if identity in seen_outputs:
-                    continue
-                seen_outputs.add(identity)
+            if is_tool_output:
                 call = names.get(p.get('call_id'), {})
                 category = infer_tool(call, classify)
                 body = p.get('output', '')
-                chars = len(body if isinstance(body, str) else json.dumps(body, ensure_ascii=False))
+                body = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)
+                chars = len(body)
+                tokens = estimate(body)
                 tools[category]['calls'] += 1
                 tools[category]['characters'] += chars
                 tools[category]['largest'] = max(tools[category]['largest'], chars)
+                tools[category]['tokens'] += tokens
+                tools[category]['largest_tokens'] = max(tools[category]['largest_tokens'], tokens)
     return totals, groups, tools, len(observed), len(used), missing_time, malformed
 
 
@@ -103,6 +110,27 @@ def classify(name):
     return '其他或无法识别'
 
 
+def tool_breakdown(tools):
+    """合并同义类别；来源依据独立于类别和统计数值。"""
+    merged = {}
+    for name, row in tools.items():
+        basis = '工具名称或命令参数'
+        if name.endswith('（按调用代码推断）'):
+            name, basis = name.removesuffix('（按调用代码推断）'), '调用代码推断'
+        elif name == '动态调用或组合工具（未能细分）':
+            name, basis = '代码执行与组合工具', '无法识别内层调用'
+        elif name == '多类工具混合返回':
+            basis = '调用代码包含多类工具'
+        if name == '文件读取':
+            name = '文件读取与搜索'
+        entry = merged.setdefault(name, {'tokens': 0, 'calls': 0, 'largest_tokens': 0, 'sources': set()})
+        entry['tokens'] += row.get('tokens', 0)
+        entry['calls'] += row['calls']
+        entry['largest_tokens'] = max(entry['largest_tokens'], row.get('largest_tokens', 0))
+        entry['sources'].add(basis)
+    return merged
+
+
 def render_details(groups, tools, missing_time, malformed, titles=None):
     titles = titles or {}
     unknown = {}
@@ -113,19 +141,15 @@ def render_details(groups, tools, missing_time, malformed, titles=None):
         if session not in unknown:
             unknown[session] = f'未命名会话 {len(unknown) + 1}'
         return unknown[session]
-    lines = ['## 工具返回内容细分', '', '把输入内容中的工具结果进一步拆开，查看哪些工具返回的内容最多。以下按已保存的返回字符数统计。', '', '| 类别 | 来源依据 | 返回次数 | 字符数 | 占工具返回字符 | 最大单次字符数 |', '|---|---|---:|---:|---:|---:|']
-    total_chars = sum(row['characters'] for row in tools.values())
-    for name, row in sorted(tools.items(), key=lambda x: -x[1]['characters']):
-        share = f"{row['characters'] / total_chars:.1%}" if total_chars else '不可得'
-        basis = '工具名称或命令参数'
-        if name.endswith('（按调用代码推断）'):
-            name = name.removesuffix('（按调用代码推断）')
-            basis = '调用代码推断'
-        elif name == '动态调用或组合工具（未能细分）':
-            name, basis = '动态调用或组合工具', '无法识别内层调用'
-        elif name == '多类工具混合返回':
-            basis = '调用代码包含多类工具'
-        lines.append(f"| {name} | {basis} | {row['calls']} | {row['characters']:,} | {share} | {row['largest']:,} |")
+    lines = ['### 输入中的工具结果分类', '', '对应上表“工具结果”一项，使用相同的 Token 估算口径；每条返回计一次。', '', '| 类别 | 来源依据 | 返回次数 | 估算 Token | 占工具结果 | 最大单次 Token |', '|---|---|---:|---:|---:|---:|']
+    merged = tool_breakdown(tools)
+    total_tokens = sum(row['tokens'] for row in merged.values())
+    for name, row in sorted(merged.items(), key=lambda x: -x[1]['tokens']):
+        share = f"{row['tokens'] / total_tokens:.1%}" if total_tokens else '—'
+        basis = '、'.join(sorted(row['sources']))
+        lines.append(f"| {name} | {basis} | {row['calls']} | {row['tokens']:,} | {share} | {row['largest_tokens']:,} |")
+    if merged:
+        lines.append(f"| 合计 | | {sum(row['calls'] for row in merged.values())} | {total_tokens:,} | {'100.0%' if total_tokens else '—'} | |")
     if not tools:
         lines.append('未找到可统计的工具返回记录。')
     lines.extend(render_charts(groups, session_name))

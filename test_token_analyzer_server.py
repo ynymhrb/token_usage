@@ -104,15 +104,14 @@ class TokenAnalyzerServerTests(unittest.TestCase):
             self.assertNotIn("### 按回合", text)
             self.assertNotIn("## 精确 Token 总览", text)
             self.assertIn("## 输入内容分类", text)
-            sections = ['## 用量总结', '## 输入内容分类', '## 工具返回内容细分',
-                        '## 重复携带与累计输入', '## 消耗分布']
+            sections = ['## 用量总结', '## 输入内容分类', '### 输入中的工具结果分类', '## 消耗分布']
             positions = [text.index(section) for section in sections]
             self.assertEqual(positions, sorted(positions))
             self.assertNotIn('本地 `token_usage_record` 汇总', text)
             self.assertNotIn('## 上下文构成', text)
             self.assertNotIn("## 数据缺口", text)
-            self.assertIn("缓存命中", text)
-            self.assertIn("会话记录文件", text)
+            self.assertIn("缓存输入", text)
+            self.assertNotIn("会话记录文件", text)
             self.assertNotIn("需要带来源标记", text)
             self.assertNotIn("rollout", text)
             self.assertNotIn("trace", text)

@@ -172,19 +172,24 @@ def render_content(contents, request_count=0):
     rows = {key: sum(estimate(body) for body in values) for key, values in contents.items()}
     total = sum(rows.values())
     title = '### 请求样本中的输入分类' if request_count else '## 输入内容分类'
-    basis = f'来自 {request_count} 次已保存请求，按请求累计。' if request_count else '按已保存内容估算，每条内容计一次；助手消息作为后续输入历史统计。'
+    basis = f'来自 {request_count} 次已保存请求，按请求累计。' if request_count else '以下是日志中可识别的输入正文大小，每条计一次，未累计重复携带；占比仅针对本表合计。助手历史属于后续输入。'
     note = '基础指令可能与实际发送版本存在一定误差。' if any(key in contents for key in ('基础指令', '请求顶层指令')) else ''
     method_note = '本地分词器不可用，使用字符粗估。' if '粗估公式' in method else ''
-    lines = [title, '', basis + note + method_note, '', '| 类别 | 估算 Token | 占分类内容估算量 | 字符数 | 来源依据 |', '|---|---:|---:|---:|---|']
+    lines = [title, '', basis, '', '| 类别 | 估算 Token | 占正文合计 | 来源依据 |', '|---|---:|---:|---|']
     sources = {'基础指令': '基础指令字段', '请求顶层指令': 'request.instructions', '工具定义': 'request.tools / persisted_dynamic_tools', '系统指令': 'system 角色', '开发者指令': 'developer 角色', 'Skill 说明': 'skills_instructions 显式区块', 'Skill 正文（显式标记）': 'skill 显式区块', 'AGENTS 与工作区规则': '规则消息中的 INSTRUCTIONS 区块', '工具结果': '调用返回记录', '工具参数与调用代码': '调用参数字段', '用户消息': 'user 角色', '助手消息': 'assistant 角色'}
     sources['工具定义'] = '已保存的工具声明'
     sources['工具定义（原生补估）'] = '当前原生工具定义基线'
+    sources.update({'开发者指令': '开发者消息', '用户消息': '用户消息', '助手消息': '助手历史消息',
+                    '系统指令': '系统消息', 'Skill 说明': '技能说明区块',
+                    'AGENTS 与工作区规则': '工作区规则区块', '请求顶层指令': '请求中的基础指令'})
     for key, value in sorted(rows.items(), key=lambda item: -item[1]):
         share = f'{value / total:.1%}' if total else '不可得'
-        lines.append(f'| {key} | {value:,} | {share} | {sum(map(len, contents[key])):,} | {sources.get(key, "未识别结构，保留原类别")} |')
+        lines.append(f'| {key} | {value:,} | {share} | {sources.get(key, "未识别结构，保留原类别")} |')
     if not total:
         lines.append('范围内没有可分类的已保存正文。')
     else:
-        lines.append(f'| 合计 | {total:,} | 100.0% | {sum(len(body) for values in contents.values() for body in values):,} | |')
+        lines.append(f'| 合计 | {total:,} | 100.0% | |')
+    if note or method_note:
+        lines.extend(['', note + method_note])
     lines.append('')
     return '\n'.join(lines)

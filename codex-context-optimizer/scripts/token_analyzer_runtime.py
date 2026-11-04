@@ -15,6 +15,7 @@ from content_analysis import load_titles, render_content
 from request_analysis import inspect_requests
 from request_comparison import render_comparison
 from native_tools import supplement_native_tools
+from report_advice import render_advice
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -192,24 +193,11 @@ def _diagnostic_markdown(
     lines = [
         "# Codex 上下文与 Token 诊断", "",
         "## 用量总结", "",
-        f"- 分析范围：{scope_description}；有用量记录的会话 {session_count} 个，涉及 {rollout_count} 份会话记录文件，其中 {readable_trace_count} 份包含有效用量。",
-        f"- 输入 Token {input_tokens:,}；缓存命中 {cached_tokens:,}（{cache_percent}）；非缓存差额 {uncached_tokens:,}；输出 Token {output_tokens:,}。",
+        f"- 分析范围：{scope_description}；{session_count} 个有用量记录的会话。",
+        f"- 累计输入：{input_tokens:,} Token；其中缓存输入 {cached_tokens:,}（{cache_percent}），非缓存输入 {uncached_tokens:,}。",
+        f"- 输出总计：{output_tokens:,} Token。",
+        "- 累计输入包含历史内容在多次请求中的重复携带；下方分类统计正文大小。",
     ]
-    observed_category_characters = sum(categories.values())
-    if request_call_count and observed_category_characters:
-        rows = _category_rows(categories)
-        top = max(rows, key=lambda row: row[1])
-        lines.append(f"- 已保存请求结构中最大类别为 {_LABELS[top[0]]}（{top[2]:.1%}）；这是字符代理样本，不是精确 Token 账单。")
-    elif request_call_count:
-        lines.append("- 内容分类见下表；统计已保存正文的 Token 估算与占比。")
-    else:
-        lines.append("- 内容分类见下表；统计已保存正文的 Token 估算与占比。")
-    lines.extend([
-        "", "## 可执行优化建议", "",
-        "1. 若后续请求结构显示工具结果占比最高，优先采用“结论 + 文件引用 + 可展开详情”，不要先删 Skill。",
-        "2. 对已完成阶段生成短状态摘要，避免整段历史工具输出反复进入后续请求。",
-        "3. 仅在类别覆盖充分时再缩短静态指令、Skill 或工具 schema。",
-    ])
     return "\n".join(lines)
 
 
@@ -232,9 +220,7 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
     cached_tokens = totals['cached_input_tokens']
     uncached_tokens = max(0, input_tokens - cached_tokens)
     cache_ratio = round(cached_tokens / input_tokens, 6) if input_tokens else None
-    calls, categories = _context(exports, scope)
     sample_count, sample_contents = inspect_requests(exports, scope)
-    export_count = sum(_context([path], scope)[0] > 0 for path in exports)
     diagnostic = _diagnostic_markdown(
         scope_description=scope[1],
         rollout_count=observed,
@@ -244,12 +230,11 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         cached_tokens=cached_tokens,
         uncached_tokens=uncached_tokens,
         cache_ratio=cache_ratio,
-        request_call_count=calls,
-        export_rollout_count=export_count,
-        categories=categories,
+        request_call_count=sample_count,
+        export_rollout_count=0,
+        categories=Counter(),
         session_count=len(groups['会话']),
     )
-    end = diagnostic.index('## 可执行优化建议')
     samples = render_content(sample_contents, request_count=sample_count) + '\n' if sample_count and sample_contents else ''
     titles = load_titles(sessions_root.parent)
     native_note = f'\n{native_added} 个会话的工具定义使用当前原生默认配置补估，已计入合计；历史版本及配置可能不同。\n' if native_added else ''
@@ -257,7 +242,7 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         native_note += f'\n{native_failed} 个会话的原生工具定义补估失败，未计入合计。\n'
     details = render_details(groups, tool_rows, missing_time, malformed, titles)
     tools_detail, distribution = details.split('## 消耗分布', 1)
-    diagnostic = (diagnostic[:end] + render_content(contents) + native_note + '\n' + samples
+    diagnostic = (diagnostic + '\n\n' + render_content(contents) + native_note
                   + '\n' + tools_detail + render_comparison(exports, rollouts, scope, titles)
-                  + '\n## 消耗分布' + distribution + '\n' + diagnostic[end:])
+                  + '\n' + samples + '\n## 消耗分布' + distribution + '\n' + render_advice(contents, tool_rows))
     return {"summary": diagnostic}

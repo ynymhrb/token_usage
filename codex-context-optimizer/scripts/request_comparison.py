@@ -79,7 +79,7 @@ def render_comparison(exports, rollouts, scope, titles=None):
     names = {session: next((title for key, title in titles.items() if key == session or key in session), f'未命名会话 {index}') for index, session in enumerate(sessions, 1)}
     lines = ['## 重复携带与累计输入', '', '同一段内容可能随多次请求重复输入；这里统计重复次数，并与这些请求记录的实际输入 Token 对照。', '']
     if not totals['requests']:
-        return '\n'.join(lines + ['未保存逐次请求，暂不能统计工具结果的重复携带次数和累计上下文估算；上方合计仅为保存正文的大小。', ''])
+        return '重复携带次数与累计分类用量：缺少逐次请求记录，暂不能统计。\n'
     lines.extend([f"已保存请求 {totals['requests']:,} 次，正文累计估算 {totals['estimated']:,} Token。各会话分别累计后汇总。", ''])
     if totals['matched_requests']:
         estimated, actual = totals['matched_estimated'], totals['actual']

@@ -46,7 +46,7 @@ def _tool_list() -> dict[str, object]:
     return {
         "tools": [{
             "name": "analyze",
-            "description": "分析本地 Codex Token 并自动查询官方账户额度；默认当前会话，直接返回完整诊断，不写入报告文件。",
+            "description": "分析本地 Codex 累计用量与输入正文分类；默认当前会话，直接返回诊断和图表，不写入报告文件。",
             "inputSchema": TOOL_SCHEMA,
         }],
     }

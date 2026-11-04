@@ -7,18 +7,43 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).parent / 'codex-context-optimizer/scripts'))
-from record_analysis import inspect_records, classify, render_details
+from record_analysis import inspect_records, classify, render_details, tool_breakdown
+from content_analysis import token_estimator
+from collections import defaultdict
 from token_analyzer_runtime import _context
 
 
 class RecordAnalysisTests(unittest.TestCase):
+    def test_tool_tokens_reconcile_with_parent_after_duplicate_outputs(self):
+        contents = defaultdict(list)
+        records = [
+            {'type': 'response_item', 'payload': {'type': 'function_call', 'call_id': 'c', 'name': 'read_file'}},
+            {'type': 'response_item', 'payload': {'type': 'function_call_output', 'id': 'o', 'call_id': 'c', 'output': '中文内容 abc'}},
+            {'type': 'response_item', 'payload': {'type': 'function_call_output', 'id': 'o', 'call_id': 'c', 'output': '中文内容 abc'}},
+            {'type': 'response_item', 'payload': {'type': 'function_call_output', 'id': 'o', 'call_id': 'c', 'output': {'text': '不同结果'}}},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'session.jsonl'
+            path.write_text('\n'.join(map(json.dumps, records)), encoding='utf-8')
+            tools = inspect_records([path], ('all', '', None, None, None), contents)[2]
+        estimate, _ = token_estimator()
+        self.assertEqual(len(contents['工具结果']), 2)
+        self.assertEqual(sum(row['tokens'] for row in tools.values()), sum(map(estimate, contents['工具结果'])))
+
+    def test_equivalent_categories_merge_without_losing_tokens(self):
+        merged = tool_breakdown({'文件读取': {'tokens': 10, 'calls': 1, 'largest_tokens': 10},
+            '文件读取与搜索（按调用代码推断）': {'tokens': 20, 'calls': 2, 'largest_tokens': 12}})
+        self.assertEqual(list(merged), ['文件读取与搜索'])
+        self.assertEqual(merged['文件读取与搜索']['tokens'], 30)
+        self.assertEqual(merged['文件读取与搜索']['largest_tokens'], 12)
+
     def test_tool_evidence_has_its_own_column(self):
         tools = {name: {'calls': 1, 'characters': 10, 'largest': 10} for name in (
             'Git（按调用代码推断）', '动态调用或组合工具（未能细分）', '多类工具混合返回')}
         report = render_details({'时间': {}, '会话': {}}, tools, 0, 0, {})
         self.assertIn('| 类别 | 来源依据 |', report)
         self.assertIn('| Git | 调用代码推断 |', report)
-        self.assertIn('| 动态调用或组合工具 | 无法识别内层调用 |', report)
+        self.assertIn('| 代码执行与组合工具 | 无法识别内层调用 |', report)
         self.assertNotIn('（按调用代码推断）', report)
 
     def test_combined_tools_are_not_misreported_as_shell(self):

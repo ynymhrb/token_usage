@@ -47,7 +47,7 @@ def render_charts(groups, session_name):
         labels = ', '.join(f'"{hour.strftime(label_format)}"' for hour in slots)
         period = str(start.date()) if start.date() == end.date() else f'{start.date()} 至 {end.date()}'
         lines.extend([
-            f'每 {step} 小时合并一柱；横轴为时段起点，末段不足 {step} 小时按实际记录汇总。', '',
+            f'每柱 {step} 小时，横轴标注时段起点。', '',
             *chart_config(CHART_WIDTH, bars=True), '  themeVariables:', '    xyChart:',
             "      plotColorPalette: '#2563eb'", '  xyChart:', f'    width: {CHART_WIDTH}',
             '    height: 300', '    titleFontSize: 16',

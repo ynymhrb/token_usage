@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 SKILL = ROOT / ".claude" / "skills" / "usage-analyze"
 SKILL_MD = SKILL / "SKILL.md"
 OPENAI_YAML = SKILL / "agents" / "openai.yaml"

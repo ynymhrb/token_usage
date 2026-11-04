@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parent
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 WRAPPER = REPOSITORY_ROOT / "scripts" / "usage-analyze.ps1"
 PROFILER = REPOSITORY_ROOT / "claude_session_token_profiler.py"
 POWERSHELL = "powershell"

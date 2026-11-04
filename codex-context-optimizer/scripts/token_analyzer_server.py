@@ -113,15 +113,24 @@ def _response(request: Mapping[str, Any]) -> dict[str, object]:
 
 def main() -> int:
     for line in sys.stdin:
+        request_id = None
         try:
             request = json.loads(line)
             if not isinstance(request, Mapping):
                 raise AnalysisError("请求必须是对象。")
+            request_id = request.get('id')
+            if 'id' not in request:
+                # JSON-RPC 通知不能返回响应，也不能执行分析任务。
+                continue
             response = _response(request)
+        except json.JSONDecodeError:
+            response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "请求不是有效 JSON。"}}
         except AnalysisError as error:
-            response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32602, "message": str(error)}}
-        except (OSError, ValueError, json.JSONDecodeError):
-            response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": "本地 Token 分析失败。"}}
+            response = {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": str(error)}}
+        except Exception as error:
+            # 协议边界兜底：失败必须回到原请求，避免客户端等待超时。
+            print(f"Token 分析异常：{type(error).__name__}", file=sys.stderr, flush=True)
+            response = {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": "本地 Token 分析失败。"}}
         if response:
             print(json.dumps(response, ensure_ascii=False), flush=True)
     return 0

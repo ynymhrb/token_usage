@@ -41,6 +41,9 @@ class AnalysisError(ValueError):
 
 def _scope(expression: str | None, session_id: str | None, now: datetime) -> tuple[str, str, datetime | None, datetime | None, str | None]:
     value = expression.strip() if expression else None
+    natural_day = re.fullmatch(r'(?:请)?(?:帮我)?(?:分析|统计|查看)?\s*(今天|昨天)(?:的)?(?:全部|所有)?(?:会话)?(?:的)?(?:\s*token)?(?:消耗|用量)?', value or '', re.I)
+    if natural_day:
+        value = natural_day.group(1)
     if not value or value in {"当前会话", "这个会话"}:
         if not session_id:
             raise AnalysisError("无法取得当前会话标识；请明确指定范围，不能自动扫描历史。")

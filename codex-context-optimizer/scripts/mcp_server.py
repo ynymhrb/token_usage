@@ -44,9 +44,11 @@ def output(text, data, source, failed=False):
 
 data = Path(os.environ.get("PLUGIN_DATA", Path.cwd() / ".codex-context-data"))
 for line in sys.stdin:
+    request_id = None
     try:
         req = json.loads(line); method = req.get("method"); params = req.get("params", {}); result = None
-        if method == "notifications/initialized":
+        request_id = req.get('id')
+        if 'id' not in req:
             continue
         if method == "initialize":
             client_version = params.get("protocolVersion") if isinstance(params, dict) else None
@@ -64,5 +66,5 @@ for line in sys.stdin:
         else: raise ValueError("不支持的方法")
         response = {"jsonrpc": "2.0", "id": req.get("id"), "result": result}
     except Exception:
-        response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": "受控工具执行失败"}}
+        response = {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": "受控工具执行失败"}}
     print(json.dumps(response, ensure_ascii=False), flush=True)

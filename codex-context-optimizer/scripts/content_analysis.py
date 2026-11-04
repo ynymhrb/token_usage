@@ -171,5 +171,5 @@ def render_content(contents, request_count=0):
         lines.append(f'| {key} | {value:,} | {share} | {sum(map(len, contents[key])):,} | {sources.get(key, "未识别结构，保留原类别")} |')
     if not total:
         lines.append('范围内没有可分类的已保存正文。')
-    lines.extend(['', '未出现的系统提示、Skill 正文、工具定义等不等于零；可能未记录或记录在所选时间之前。AGENTS/Skill 仅识别显式区块，无法分离的内容留在其原始消息类别中。', ''])
+    lines.append('')
     return '\n'.join(lines)

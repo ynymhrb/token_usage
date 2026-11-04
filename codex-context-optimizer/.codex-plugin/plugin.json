@@ -1,6 +1,6 @@
 {
   "name": "codex-context-optimizer",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "description": "通过受控工具压缩大输出与重复输出的本地上下文优化插件。",
   "mcpServers": "./.mcp.json",
   "hooks": "./hooks/hooks.json",

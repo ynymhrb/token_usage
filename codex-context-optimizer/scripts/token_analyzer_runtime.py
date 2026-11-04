@@ -188,7 +188,7 @@ def _diagnostic_markdown(
     coverage = f"{export_rollout_count}/{rollout_count}" if rollout_count else "0/0"
     lines = [
         "# Codex 上下文与 Token 诊断", "",
-        "## 结论", "",
+        "## 用量总结", "",
         f"- 分析范围：{scope_description}；有用量记录的会话 {session_count} 个，涉及 {rollout_count} 份会话记录文件，其中 {readable_trace_count} 份包含有效用量。",
         f"- 输入 Token {input_tokens:,}；缓存命中 {cached_tokens:,}（{cache_percent}）；非缓存差额 {uncached_tokens:,}；输出 Token {output_tokens:,}。",
     ]
@@ -202,31 +202,6 @@ def _diagnostic_markdown(
     else:
         lines.append("- 内容分类见下表；统计已保存正文的 Token 估算与占比。")
     lines.extend([
-        "", "## 精确 Token 总览", "",
-        "| 指标 | Token | 说明 |",
-        "|---|---:|---|",
-        f"| 输入 Token | {input_tokens:,} | 本地 `token_usage_record` 汇总 |",
-        f"| 输出 Token | {output_tokens:,} | 本地 `token_usage_record` 汇总 |",
-        f"| 缓存读取 Token | {cached_tokens:,} | 本地记录字段 |",
-        f"| 非缓存输入差额 | {uncached_tokens:,} | 输入减缓存；不等于订阅扣减或美元成本 |",
-        "",
-        "## 上下文构成", "",
-    ])
-    if request_call_count and observed_category_characters:
-        lines.extend([
-            "| 类别 | 占已观测请求结构 | 结论 | 可做动作 |",
-            "|---|---:|---|---|",
-        ])
-        for key, _, share, action in _category_rows(categories):
-            share_text = f"{share:.1%}" if share is not None else "不可得"
-            lines.append(f"| {_LABELS[key]} | {share_text} | 请求结构字符代理 | {action} |")
-    else:
-        lines.append("按已保存内容分类，展示各类正文的 Token 估算与占比。")
-    lines.extend([
-        "", "## 工具结果细分", "",
-        "当前本地导出尚未保存工具调用名称与结果的一对一归因表；不能诚实地拆成命令、文件、网页或子代理类别。",
-        "", "## 消耗排行", "",
-        "当前聊天窗导出只保证 Token 汇总，不保证每次调用都带可关联的时间、会话和用户回合字段；对应排行在字段缺失时不可得。",
         "", "## 可执行优化建议", "",
         "1. 若后续请求结构显示工具结果占比最高，优先采用“结论 + 文件引用 + 可展开详情”，不要先删 Skill。",
         "2. 对已完成阶段生成短状态摘要，避免整段历史工具输出反复进入后续请求。",
@@ -271,12 +246,15 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         categories=categories,
         session_count=len(groups['会话']),
     )
-    start = diagnostic.index('## 工具结果细分')
     end = diagnostic.index('## 可执行优化建议')
     samples = render_content(sample_contents, request_count=sample_count) + '\n' if sample_count and sample_contents else ''
     titles = load_titles(sessions_root.parent)
     native_note = f'\n{native_added} 个会话的工具定义使用当前原生默认配置补估，已计入合计；历史版本及配置可能不同。\n' if native_added else ''
     if native_failed:
         native_note += f'\n{native_failed} 个会话的原生工具定义补估失败，未计入合计。\n'
-    diagnostic = diagnostic[:start] + samples + render_content(contents) + native_note + '\n' + render_comparison(exports, rollouts, scope, titles) + '\n' + render_details(groups, tool_rows, missing_time, malformed, titles) + '\n' + diagnostic[end:]
+    details = render_details(groups, tool_rows, missing_time, malformed, titles)
+    tools_detail, distribution = details.split('## 消耗分布', 1)
+    diagnostic = (diagnostic[:end] + render_content(contents) + native_note + '\n' + samples
+                  + '\n' + tools_detail + render_comparison(exports, rollouts, scope, titles)
+                  + '\n## 消耗分布' + distribution + '\n' + diagnostic[end:])
     return {"summary": diagnostic}

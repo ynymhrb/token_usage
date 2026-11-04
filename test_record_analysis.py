@@ -12,6 +12,15 @@ from token_analyzer_runtime import _context
 
 
 class RecordAnalysisTests(unittest.TestCase):
+    def test_tool_evidence_has_its_own_column(self):
+        tools = {name: {'calls': 1, 'characters': 10, 'largest': 10} for name in (
+            'Git（按调用代码推断）', '动态调用或组合工具（未能细分）', '多类工具混合返回')}
+        report = render_details({'时间': {}, '会话': {}}, tools, 0, 0, {})
+        self.assertIn('| 类别 | 来源依据 |', report)
+        self.assertIn('| Git | 调用代码推断 |', report)
+        self.assertIn('| 动态调用或组合工具 | 无法识别内层调用 |', report)
+        self.assertNotIn('（按调用代码推断）', report)
+
     def test_combined_tools_are_not_misreported_as_shell(self):
         self.assertEqual(classify('exec'), '代码执行与组合工具')
         self.assertEqual(classify('functions.exec'), '代码执行与组合工具')

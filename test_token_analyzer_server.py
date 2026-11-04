@@ -59,12 +59,18 @@ class TokenAnalyzerServerTests(unittest.TestCase):
 
             text = responses[0]["result"]["content"][0]["text"]
             self.assertIn("# Codex 上下文与 Token 诊断", text)
-            self.assertIn("## 结论", text)
+            self.assertIn("## 用量总结", text)
             self.assertNotIn("## 覆盖率与可信度", text)
             self.assertNotIn("## 官方账户用量", text)
             self.assertNotIn("### 按回合", text)
-            self.assertIn("## 精确 Token 总览", text)
-            self.assertIn("## 上下文构成", text)
+            self.assertNotIn("## 精确 Token 总览", text)
+            self.assertIn("## 输入内容分类", text)
+            sections = ['## 用量总结', '## 输入内容分类', '## 工具返回内容细分',
+                        '## 重复携带与累计输入', '## 消耗分布']
+            positions = [text.index(section) for section in sections]
+            self.assertEqual(positions, sorted(positions))
+            self.assertNotIn('本地 `token_usage_record` 汇总', text)
+            self.assertNotIn('## 上下文构成', text)
             self.assertNotIn("## 数据缺口", text)
             self.assertIn("缓存命中", text)
             self.assertIn("会话记录文件", text)
@@ -108,7 +114,7 @@ class TokenAnalyzerServerTests(unittest.TestCase):
             for response in responses:
                 text = response["result"]["content"][0]["text"]
                 self.assertIn("# Codex 上下文与 Token 诊断", text)
-                self.assertIn("按已保存内容分类", text)
+                self.assertIn("## 输入内容分类", text)
                 self.assertNotIn("不能判断系统提示", text)
 
     def test_server_runs_when_plugin_is_copied_to_an_install_cache(self):

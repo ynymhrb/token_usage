@@ -113,11 +113,19 @@ def render_details(groups, tools, missing_time, malformed, titles=None):
         if session not in unknown:
             unknown[session] = f'未命名会话 {len(unknown) + 1}'
         return unknown[session]
-    lines = ['## 工具结果细分', '', '口径：本地已保存的工具返回内容字符数，按工具名称分类；不是累计输入 Token，也不代表完整请求上下文占比。', '', '| 类别 | 返回次数 | 字符数 | 占工具返回字符 | 最大单次字符数 |', '|---|---:|---:|---:|---:|']
+    lines = ['## 工具返回内容细分', '', '把输入内容中的工具结果进一步拆开，查看哪些工具返回的内容最多。以下按已保存的返回字符数统计。', '', '| 类别 | 来源依据 | 返回次数 | 字符数 | 占工具返回字符 | 最大单次字符数 |', '|---|---|---:|---:|---:|---:|']
     total_chars = sum(row['characters'] for row in tools.values())
     for name, row in sorted(tools.items(), key=lambda x: -x[1]['characters']):
         share = f"{row['characters'] / total_chars:.1%}" if total_chars else '不可得'
-        lines.append(f"| {name} | {row['calls']} | {row['characters']:,} | {share} | {row['largest']:,} |")
+        basis = '工具名称或命令参数'
+        if name.endswith('（按调用代码推断）'):
+            name = name.removesuffix('（按调用代码推断）')
+            basis = '调用代码推断'
+        elif name == '动态调用或组合工具（未能细分）':
+            name, basis = '动态调用或组合工具', '无法识别内层调用'
+        elif name == '多类工具混合返回':
+            basis = '调用代码包含多类工具'
+        lines.append(f"| {name} | {basis} | {row['calls']} | {row['characters']:,} | {share} | {row['largest']:,} |")
     if not tools:
         lines.append('未找到可统计的工具返回记录。')
     lines.extend(render_charts(groups, session_name))

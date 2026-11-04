@@ -196,9 +196,9 @@ def _diagnostic_markdown(
         top = max(rows, key=lambda row: row[1])
         lines.append(f"- 已保存请求结构中最大类别为 {_LABELS[top[0]]}（{top[2]:.1%}）；这是字符代理样本，不是精确 Token 账单。")
     elif request_call_count:
-        lines.append("- 已保存请求结构为空或没有可分类内容，不能判断系统提示、Skill、消息或工具结果哪个占主要部分。")
+        lines.append("- 内容分类见下表；统计已保存正文的 Token 估算与占比。")
     else:
-        lines.append("- 当前没有已保存请求结构，不能判断系统提示、Skill、消息或工具结果哪个占主要部分。")
+        lines.append("- 内容分类见下表；统计已保存正文的 Token 估算与占比。")
     lines.extend([
         "", "## 精确 Token 总览", "",
         "| 指标 | Token | 说明 |",
@@ -219,7 +219,7 @@ def _diagnostic_markdown(
             share_text = f"{share:.1%}" if share is not None else "不可得"
             lines.append(f"| {_LABELS[key]} | {share_text} | 请求结构字符代理 | {action} |")
     else:
-        lines.append("完整请求级类别表不可得；下方仍可统计已保存内容的分类，不将它冒充完整请求上下文占比。")
+        lines.append("按已保存内容分类，展示各类正文的 Token 估算与占比。")
     lines.extend([
         "", "## 工具结果细分", "",
         "当前本地导出尚未保存工具调用名称与结果的一对一归因表；不能诚实地拆成命令、文件、网页或子代理类别。",

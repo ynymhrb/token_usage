@@ -108,7 +108,8 @@ class TokenAnalyzerServerTests(unittest.TestCase):
             for response in responses:
                 text = response["result"]["content"][0]["text"]
                 self.assertIn("# Codex 上下文与 Token 诊断", text)
-                self.assertIn("类别表不可得", text)
+                self.assertIn("按已保存内容分类", text)
+                self.assertNotIn("不能判断系统提示", text)
 
     def test_server_runs_when_plugin_is_copied_to_an_install_cache(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -1,5 +1,6 @@
 """生成无需报告文件的聊天内图表。"""
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 
 def chart_label(value):
@@ -8,19 +9,39 @@ def chart_label(value):
 
 def render_charts(groups, session_name):
     lines = ['', '## 消耗分布', '', '口径：累计输入 Token（包含缓存输入）。', '', '### 按小时', '']
-    days = defaultdict(dict)
+    hours = defaultdict(int)
     for label, row in groups['时间'].items():
         try:
-            day, hour = label.split(' ')
-            days[day][int(hour[:2])] = row['input_tokens']
-        except (ValueError, IndexError):
+            hour = datetime.strptime(label, '%Y-%m-%d %H:%M').replace(minute=0)
+            hours[hour] += row['input_tokens']
+        except (ValueError, TypeError):
             continue
-    for day, hours in sorted(days.items()):
-        slots = range(min(hours), max(hours) + 1)
-        labels = ', '.join(f'"{hour:02d}:00"' for hour in slots)
-        values = ', '.join(str(hours.get(hour, 0)) for hour in slots)
-        lines.extend(['```mermaid', 'xychart-beta', f'    title "{chart_label(day)} 每小时输入 Token"', f'    x-axis [{labels}]', f'    y-axis "输入 Token" 0 --> {max(1, max(hours.values()))}', f'    bar [{values}]', '```', ''])
-    if not days:
+    if hours:
+        start, end = min(hours), max(hours)
+        span = (end - start) // timedelta(hours=1) + 1
+        step = (span + 11) // 12
+        values = [0] * ((span + step - 1) // step)
+        for hour, value in hours.items():
+            values[((hour - start) // timedelta(hours=1)) // step] += value
+        slots = [start + timedelta(hours=i * step) for i in range(len(values))]
+        if start.date() == end.date():
+            label_format = '%H:%M'
+        elif (start.year, start.month) == (end.year, end.month):
+            label_format = '%d日%H时'
+        else:
+            label_format = '%m/%d %H时'
+        labels = ', '.join(f'"{hour.strftime(label_format)}"' for hour in slots)
+        period = str(start.date()) if start.date() == end.date() else f'{start.date()} 至 {end.date()}'
+        lines.extend([
+            f'每 {step} 小时合并一柱；横轴为时段起点，末段不足 {step} 小时按实际记录汇总。', '',
+            '```mermaid', '---', 'config:', '  themeVariables:', '    xyChart:',
+            "      plotColorPalette: '#2563eb'", '  xyChart:', '    width: 960',
+            '    xAxis:', '      labelFontSize: 12', '---', 'xychart-beta',
+            f'    title "{period} 每 {step} 小时输入 Token"',
+            f'    x-axis [{labels}]', f'    y-axis "输入 Token" 0 --> {max(1, max(values))}',
+            f'    bar [{", ".join(str(value) for value in values)}]', '```', '',
+        ])
+    else:
         lines.append('没有可绘制的小时用量。')
     lines.extend(['### 按会话', ''])
     rows = sorted(groups['会话'].items(), key=lambda item: -item[1]['input_tokens'])

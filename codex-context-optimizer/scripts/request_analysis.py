@@ -5,7 +5,7 @@ from datetime import datetime
 from content_analysis import collect_content, split_instructions, text_of
 
 
-def inspect_requests(paths, scope):
+def inspect_requests(paths, scope, observations=None):
     contents = defaultdict(list)
     count = 0
     seen = set()
@@ -34,6 +34,8 @@ def inspect_requests(paths, scope):
             seen.add(identity)
             request = row['request']
             count += 1
+            aggregate = contents
+            contents = defaultdict(list)
             if request.get('instructions'):
                 split_instructions(text_of(request['instructions']), '请求顶层指令', contents, allow_agents=True)
             for field in ('tools', 'persisted_dynamic_tools'):
@@ -41,8 +43,7 @@ def inspect_requests(paths, scope):
                     contents['工具定义'].append(json.dumps(request[field], ensure_ascii=False, sort_keys=True))
             items = request.get('input', [])
             if isinstance(items, str):
-                contents['用户消息'].append(items)
-                continue
+                items = [{'role': 'user', 'content': items}]
             if not isinstance(items, list):
                 items = [items]
             for item in items:
@@ -55,4 +56,11 @@ def inspect_requests(paths, scope):
                     if sum(len(values) for values in contents.values()) > before:
                         continue
                 contents['其他请求内容'].append(json.dumps(item, ensure_ascii=False, sort_keys=True))
+            if observations is not None:
+                observations.append({'session': str(row.get('thread_id') or row.get('session_id') or path),
+                                     'response_id': row.get('response_id'), 'contents': contents,
+                                     'tools': [item for item in items if isinstance(item, dict) and str(item.get('type', '')).endswith('_call_output')]})
+            for category, values in contents.items():
+                aggregate[category].extend(values)
+            contents = aggregate
     return count, contents

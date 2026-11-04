@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from record_analysis import inspect_records, render_details
 from content_analysis import load_titles, render_content
 from request_analysis import inspect_requests
+from request_comparison import render_comparison
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -271,5 +272,6 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
     start = diagnostic.index('## 工具结果细分')
     end = diagnostic.index('## 可执行优化建议')
     samples = render_content(sample_contents, request_count=sample_count) + '\n' if sample_count and sample_contents else ''
-    diagnostic = diagnostic[:start] + samples + render_content(contents) + '\n' + render_details(groups, tool_rows, missing_time, malformed, load_titles(sessions_root.parent)) + '\n' + diagnostic[end:]
+    titles = load_titles(sessions_root.parent)
+    diagnostic = diagnostic[:start] + samples + render_content(contents) + '\n' + render_comparison(exports, rollouts, scope, titles) + '\n' + render_details(groups, tool_rows, missing_time, malformed, titles) + '\n' + diagnostic[end:]
     return {"summary": diagnostic}

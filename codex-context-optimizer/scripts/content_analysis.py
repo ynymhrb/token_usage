@@ -139,7 +139,7 @@ def collect_content(record, counts):
         counts[category].append(body)
 
 
-def render_content(contents, request_count=0):
+def token_estimator():
     # 无本地分词依赖时也提供显式粗估，绝不联网下载或把估算称作账单。
     def estimate(body):
         non_ascii = sum(ord(c) > 127 for c in body)
@@ -160,6 +160,11 @@ def render_content(contents, request_count=0):
             method = '使用本地 o200k_base 分词计数；这是可见正文的分词估算，不保证与实际模型的分词器一致。'
         except (ImportError, OSError, ValueError):
             method = '本地分词器不可用；' + method
+    return estimate, method
+
+
+def render_content(contents, request_count=0):
+    estimate, method = token_estimator()
     rows = {key: sum(estimate(body) for body in values) for key, values in contents.items()}
     total = sum(rows.values())
     title = '### 请求样本分类（Token 估算）' if request_count else '### 已保存内容分类（Token 估算）'
@@ -171,5 +176,7 @@ def render_content(contents, request_count=0):
         lines.append(f'| {key} | {value:,} | {share} | {sum(map(len, contents[key])):,} | {sources.get(key, "未识别结构，保留原类别")} |')
     if not total:
         lines.append('范围内没有可分类的已保存正文。')
+    else:
+        lines.append(f'| 合计 | {total:,} | 100.0% | {sum(len(body) for values in contents.values() for body in values):,} | |')
     lines.append('')
     return '\n'.join(lines)

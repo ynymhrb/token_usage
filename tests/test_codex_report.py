@@ -8,7 +8,7 @@ from codex_token.models import DataGap, RunTrace
 from codex_token.report import build_report, render_markdown_report, write_json_report
 
 
-FIXTURE = Path(__file__).parent / "tests" / "fixtures" / "codex" / "rollout-valid.jsonl"
+FIXTURE = Path(__file__).parent / "fixtures" / "codex" / "rollout-valid.jsonl"
 
 
 class CodexReportTests(unittest.TestCase):

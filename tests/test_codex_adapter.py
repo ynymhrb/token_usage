@@ -5,7 +5,7 @@ from pathlib import Path
 from codex_token.adapter import discover_rollouts, parse_rollout
 
 
-FIXTURES = Path(__file__).parent / "tests" / "fixtures" / "codex"
+FIXTURES = Path(__file__).parent / "fixtures" / "codex"
 
 
 class CodexAdapterTests(unittest.TestCase):

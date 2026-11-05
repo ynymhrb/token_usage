@@ -11,7 +11,7 @@ from codex_token.cli import main
 
 class CodexCliTests(unittest.TestCase):
     def test_analyze_defaults_to_current_session_and_prints_compact_summary(self):
-        fixture = Path(__file__).parent / "tests" / "fixtures" / "codex" / "rollout-valid.jsonl"
+        fixture = Path(__file__).parent / "fixtures" / "codex" / "rollout-valid.jsonl"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "rollout-2026-11-02T19-00-00_thread-123.jsonl").write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
@@ -38,7 +38,7 @@ class CodexCliTests(unittest.TestCase):
         self.assertIn("当前会话", errors.getvalue())
 
     def test_scope_overrides_current_session_and_full_report_requires_output(self):
-        fixture = Path(__file__).parent / "tests" / "fixtures" / "codex" / "rollout-valid.jsonl"
+        fixture = Path(__file__).parent / "fixtures" / "codex" / "rollout-valid.jsonl"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             destination = root / "report.json"

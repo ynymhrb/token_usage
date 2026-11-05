@@ -89,7 +89,10 @@ def _select(paths: Iterable[Path], scope: tuple[str, str, datetime | None, datet
     if kind == "all":
         return list(paths)
     if kind == "session":
-        return [path for path in paths if session_id and session_id in path.name]
+        if not session_id:
+            return []
+        pattern = re.compile(r'(?:^|[_-])' + re.escape(session_id) + r'(?=[_.-]|$)', re.IGNORECASE)
+        return [path for path in paths if pattern.search(path.name)]
     return [path for path in paths if (stamp := _start(path)) is not None and start is not None and end is not None and start <= stamp < end]
 
 

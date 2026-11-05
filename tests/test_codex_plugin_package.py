@@ -21,6 +21,8 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("scope", text)
         self.assertIn("今天", text)
         self.assertIn("ALL_TOOLS", text)
+        self.assertIn("CODEX_THREAD_ID", text)
+        self.assertIn('"session_id"', text)
         self.assertIn("不得运行本地分析脚本替代 MCP", text)
         self.assertFalse(Path("plugins/codex-context-optimizer/skills/usage-analyze/scripts/usage_analyze_chat.py").exists())
         self.assertNotIn("claude_session_token_profiler", text)

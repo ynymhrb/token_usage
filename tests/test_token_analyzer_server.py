@@ -27,6 +27,42 @@ def invoke(requests: list[dict[str, object]], env: dict[str, str]) -> list[dict[
 
 
 class TokenAnalyzerServerTests(unittest.TestCase):
+    def test_explicit_session_id_selects_each_chat_without_server_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            content = FIXTURE.read_text(encoding='utf-8')
+            (root / 'rollout-2026-11-02T12-00-00_thread-1.jsonl').write_text(content, encoding='utf-8')
+            (root / 'rollout-2026-11-02T12-00-00_thread-10.jsonl').write_text(
+                content.replace('"input_tokens":120', '"input_tokens":999'), encoding='utf-8')
+            requests = [
+                {'jsonrpc': '2.0', 'id': index, 'method': 'tools/call',
+                 'params': {'name': 'analyze', 'arguments': {'session_id': session}}}
+                for index, session in enumerate(('thread-1', 'thread-10'), 1)
+            ]
+            responses = invoke(requests, {'CODEX_THREAD_ID': '', 'CODEX_SESSION_ID': '', 'CODEX_SESSIONS_ROOT': str(root)})
+            first, second = [response['result']['content'][0]['text'] for response in responses]
+            self.assertIn('累计输入：120 Token', first)
+            self.assertNotIn('999 Token', first)
+            self.assertIn('累计输入：999 Token', second)
+
+    def test_explicit_session_overrides_stale_server_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'rollout-2026-11-02T12-00-00_current.jsonl').write_text(FIXTURE.read_text(encoding='utf-8'), encoding='utf-8')
+            responses = invoke([{'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                'params': {'name': 'analyze', 'arguments': {'session_id': 'current'}}}],
+                {'CODEX_THREAD_ID': 'stale', 'CODEX_SESSIONS_ROOT': str(root)})
+            self.assertIn('累计输入：120 Token', responses[0]['result']['content'][0]['text'])
+
+    def test_invalid_session_id_and_missing_identity_fail_closed(self):
+        requests = [
+            {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': 'analyze', 'arguments': {'session_id': '../other'}}},
+            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'analyze', 'arguments': {}}},
+        ]
+        responses = invoke(requests, {'CODEX_THREAD_ID': '', 'CODEX_SESSION_ID': ''})
+        self.assertIn('error', responses[0])
+        self.assertIn('error', responses[1])
+
     def test_internal_failure_keeps_id_and_next_request_still_works(self):
         launcher = "import sys,runpy; sys.path.insert(0,sys.argv[1]); import token_analyzer_runtime as r; r.analyze=lambda *a: 1/0; runpy.run_path(sys.argv[2],run_name='__main__')"
         requests = [dict(jsonrpc='2.0', id='failure', method='tools/call', params={'name': 'analyze'}),

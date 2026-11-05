@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import subprocess
 from collections.abc import Mapping
@@ -31,6 +32,10 @@ TOOL_SCHEMA = {
             "type": "string",
             "enum": ["full", "context", "tools"],
             "description": "可选：完整 Token 概览、上下文构成或工具相关概览；默认 full。",
+        },
+        "session_id": {
+            "type": "string",
+            "description": "当前聊天的会话标识；默认范围或当前会话范围时由调用方传入。",
         },
     },
     "additionalProperties": False,
@@ -66,12 +71,15 @@ def _call(arguments: object) -> dict[str, object]:
         raise AnalysisError("analyze 参数必须是对象。")
     scope = arguments.get("scope")
     focus = arguments.get("focus")
+    session_id = arguments.get("session_id")
     if scope is not None and not isinstance(scope, str):
         raise AnalysisError("scope 必须是字符串。")
     if focus is not None and not isinstance(focus, str):
         raise AnalysisError("focus 必须是字符串。")
+    if session_id is not None and (not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id)):
+        raise AnalysisError("session_id 格式无效。")
     sessions_root = _sessions_root()
-    current_session_id = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")
+    current_session_id = session_id or os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")
     result = analyze(scope, focus, sessions_root, current_session_id, datetime.now(timezone.utc))
     account_session = current_session_id if scope is None or scope.strip() in {'', '当前会话', '这个会话'} else None
     if os.environ.get('TOKEN_ANALYZER_ACCOUNT_QUERY', '0') != '1':

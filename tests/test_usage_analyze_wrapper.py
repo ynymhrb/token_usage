@@ -13,8 +13,8 @@ from pathlib import Path
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
-WRAPPER = REPOSITORY_ROOT / "scripts" / "usage-analyze.ps1"
-PROFILER = REPOSITORY_ROOT / "claude_session_token_profiler.py"
+WRAPPER = REPOSITORY_ROOT / "skills" / "usage-analyze" / "scripts" / "usage-analyze.ps1"
+PROFILER = REPOSITORY_ROOT / "skills" / "usage-analyze" / "scripts" / "claude_session_token_profiler.py"
 POWERSHELL = "powershell"
 
 

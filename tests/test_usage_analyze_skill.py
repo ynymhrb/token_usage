@@ -9,13 +9,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILL = ROOT / ".claude" / "skills" / "usage-analyze"
+SKILL = ROOT / "skills" / "usage-analyze"
 SKILL_MD = SKILL / "SKILL.md"
 BUNDLED_PROFILER = SKILL / "scripts" / "claude_session_token_profiler.py"
 BUNDLED_WRAPPER = SKILL / "scripts" / "usage-analyze.ps1"
 ANALYSIS_CONTRACT = SKILL / "references" / "analysis-contract.md"
 ROUTER = SKILL / "scripts" / "route_usage_analyze.py"
-ROOT_PROFILER = ROOT / "claude_session_token_profiler.py"
 
 
 class UsageAnalyzeSkillTests(unittest.TestCase):
@@ -135,9 +134,8 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
         self.assertNotRegex(text, r"(?im)^\s*&\s*claude\b")
         self.assertNotIn("..\\claude_session_token_profiler.py", text)
 
-    def test_root_and_bundled_profiler_are_identical_version_3(self):
-        self.assertEqual(ROOT_PROFILER.read_bytes(), BUNDLED_PROFILER.read_bytes())
-        text = self.read(ROOT_PROFILER)
+    def test_bundled_profiler_version_3(self):
+        text = self.read(BUNDLED_PROFILER)
         self.assertTrue(text.startswith("# Claude Code Session Token Profiler v3.0.0"))
         self.assertRegex(text, r'(?m)^__version__\s*=\s*"3\.0\.0"$')
 

@@ -15,7 +15,7 @@
 /plugin install token-usage@token-usage
 ```
 
-安装后使用 `/token-usage:usage-analyze`，不指定范围时分析当前会话。也可以使用仓库内的项目技能 `/usage-analyze`。同一项目同时启用两种入口时，可能同时看到两个选项。
+安装后在聊天窗使用 `/token-usage:usage-analyze`，不指定范围时分析当前会话，也可以附加自然语言范围。Claude Code 为插件技能加上插件名称作为前缀。
 
 ### Codex
 
@@ -34,17 +34,13 @@ codex plugin add codex-context-optimizer@token-usage-local
 .
 ├── .agents/plugins/marketplace.json    # Codex 插件市场入口
 ├── .claude-plugin/                     # Claude 插件及市场清单
-├── .claude/skills/usage-analyze/       # Claude 技能及其自包含分析脚本
+├── skills/usage-analyze/               # Claude 聊天技能及其内部分析脚本
 ├── plugins/codex-context-optimizer/    # Codex 技能、MCP 服务和钩子
-├── codex_token/                        # Codex 命令行分析与实验模块
-├── claude_session_token_profiler.py    # Claude 分析器的命令行入口
-├── scripts/                            # 独立命令行包装脚本
 ├── tests/                              # 两端及插件打包测试
-├── docs/                               # 设计、验证记录和使用文档
-└── experiments/                        # 实验配置
+└── docs/                               # 设计与验证记录
 ```
 
-Claude 技能包内的分析器是自包含副本，方便插件缓存单独运行；测试会检查它与根目录版本一致。
+分析器随各自的插件安装，用户通过聊天窗使用；插件内部脚本不作为独立入口。
 
 ## 验证
 

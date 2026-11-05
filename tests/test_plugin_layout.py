@@ -18,15 +18,15 @@ class PluginLayoutTests(unittest.TestCase):
         claude = json.loads((ROOT / '.claude-plugin/marketplace.json').read_text(encoding='utf-8'))
         self.assertEqual(claude['plugins'][0]['source'], './')
         manifest = json.loads((ROOT / '.claude-plugin/plugin.json').read_text(encoding='utf-8'))
-        self.assertTrue((ROOT / manifest['skills'][0] / 'SKILL.md').is_file())
+        self.assertTrue((ROOT / 'skills/usage-analyze' / 'SKILL.md').is_file())
 
     def test_claude_skill_and_scripts_survive_plugin_copy(self):
         with tempfile.TemporaryDirectory() as temporary:
             copy = Path(temporary)
             copytree(ROOT / '.claude-plugin', copy / '.claude-plugin')
-            copytree(ROOT / '.claude/skills/usage-analyze', copy / '.claude/skills/usage-analyze')
+            copytree(ROOT / 'skills/usage-analyze', copy / 'skills/usage-analyze')
             manifest = json.loads((copy / '.claude-plugin/plugin.json').read_text(encoding='utf-8'))
-            skill = copy / manifest['skills'][0]
+            skill = copy / 'skills/usage-analyze'
             for name in ('SKILL.md', 'scripts/usage-analyze.ps1', 'scripts/claude_session_token_profiler.py', 'scripts/current_session.py'):
                 self.assertTrue((skill / name).is_file(), name)
 

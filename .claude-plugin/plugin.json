@@ -1,0 +1,8 @@
+{
+  "name": "token-usage",
+  "description": "分析 Claude Code 本地会话 Token 消耗。",
+  "version": "0.1.0",
+  "skills": [
+    "./.claude/skills/usage-analyze"
+  ]
+}

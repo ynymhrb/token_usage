@@ -1,0 +1,13 @@
+{
+  "name": "token-usage",
+  "owner": {
+    "name": "token-usage"
+  },
+  "plugins": [
+    {
+      "name": "token-usage",
+      "source": "./",
+      "description": "Claude Code 本地 Token 消耗分析。"
+    }
+  ]
+}

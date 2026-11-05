@@ -8,8 +8,8 @@ from pathlib import Path
 from shutil import copytree
 
 
-SERVER = Path(__file__).parent / "codex-context-optimizer" / "scripts" / "token_analyzer_server.py"
-FIXTURE = Path(__file__).parent / "tests" / "fixtures" / "codex" / "rollout-valid.jsonl"
+SERVER = Path(__file__).parent.parent / "plugins" / "codex-context-optimizer" / "scripts" / "token_analyzer_server.py"
+FIXTURE = Path(__file__).parent / "fixtures" / "codex" / "rollout-valid.jsonl"
 
 
 def invoke(requests: list[dict[str, object]], env: dict[str, str]) -> list[dict[str, object]]:
@@ -158,7 +158,7 @@ class TokenAnalyzerServerTests(unittest.TestCase):
     def test_server_runs_when_plugin_is_copied_to_an_install_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache_root = Path(temporary) / "codex-context-optimizer"
-            copytree(Path(__file__).parent / "codex-context-optimizer", cache_root)
+            copytree(Path(__file__).parent.parent / "plugins" / "codex-context-optimizer", cache_root)
             root = Path(temporary) / "sessions"
             output = Path(temporary) / "reports"
             root.mkdir()

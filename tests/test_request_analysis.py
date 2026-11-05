@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from collections import defaultdict
-sys.path.insert(0, str(Path(__file__).parent / 'codex-context-optimizer/scripts'))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'plugins/codex-context-optimizer/scripts'))
 from request_analysis import inspect_requests
 from content_analysis import collect_content, render_content
 

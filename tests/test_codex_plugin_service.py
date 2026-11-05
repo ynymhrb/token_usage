@@ -9,7 +9,7 @@ from codex_token.plugin_service import PluginAnalysisError, run_plugin_analysis
 
 class PluginServiceTests(unittest.TestCase):
     def _write_rollout(self, root: Path, name: str) -> None:
-        fixture = Path(__file__).parent / "tests" / "fixtures" / "codex" / "rollout-valid.jsonl"
+        fixture = Path(__file__).parent / "fixtures" / "codex" / "rollout-valid.jsonl"
         (root / name).write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
 
     def test_default_scope_analyzes_only_current_session_and_writes_report(self):

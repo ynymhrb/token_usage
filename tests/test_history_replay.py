@@ -6,7 +6,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / 'codex-context-optimizer/scripts'))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'plugins/codex-context-optimizer/scripts'))
 from history_replay import replay_history, truncate_output, render_replay
 
 ALL = ('all', '', None, None, None)

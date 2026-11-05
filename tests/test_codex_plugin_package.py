@@ -10,7 +10,7 @@ from shutil import copytree
 
 class PluginPackageTests(unittest.TestCase):
     def test_plugin_ships_codex_usage_analyze_skill(self):
-        skill = Path("codex-context-optimizer/skills/usage-analyze/SKILL.md")
+        skill = Path("plugins/codex-context-optimizer/skills/usage-analyze/SKILL.md")
 
         text = skill.read_text(encoding="utf-8")
 
@@ -22,12 +22,12 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("今天", text)
         self.assertIn("ALL_TOOLS", text)
         self.assertIn("不得运行本地分析脚本替代 MCP", text)
-        self.assertFalse(Path("codex-context-optimizer/skills/usage-analyze/scripts/usage_analyze_chat.py").exists())
+        self.assertFalse(Path("plugins/codex-context-optimizer/skills/usage-analyze/scripts/usage_analyze_chat.py").exists())
         self.assertNotIn("claude_session_token_profiler", text)
         self.assertNotIn("statusLine", text)
 
     def test_plugin_registers_local_mcp_and_compaction_hook(self):
-        root = Path("codex-context-optimizer")
+        root = Path("plugins/codex-context-optimizer")
         manifest = json.loads((root / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         mcp = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
         hooks = json.loads((root / "hooks" / "hooks.json").read_text(encoding="utf-8"))
@@ -35,8 +35,8 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("context_optimizer", mcp["mcpServers"])
         self.assertFalse(mcp["mcpServers"]["context_optimizer"]["enabled"])
         self.assertTrue(mcp["mcpServers"]["token_analyzer"]["enabled"])
-        self.assertTrue(mcp["mcpServers"]["context_optimizer"]["command"].endswith("python.exe"))
-        self.assertTrue(mcp["mcpServers"]["token_analyzer"]["command"].endswith("python.exe"))
+        self.assertEqual(mcp["mcpServers"]["context_optimizer"]["command"], "python")
+        self.assertEqual(mcp["mcpServers"]["token_analyzer"]["command"], "python")
         self.assertEqual(mcp["mcpServers"]["context_optimizer"]["cwd"], ".")
         self.assertEqual(mcp["mcpServers"]["token_analyzer"]["cwd"], ".")
         self.assertEqual(mcp["mcpServers"]["token_analyzer"]["default_tools_approval_mode"], "approve")
@@ -46,7 +46,7 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("${PLUGIN_ROOT}", hooks["hooks"]["PreCompact"][0]["hooks"][0]["command"])
 
     def test_mcp_servers_start_from_a_copied_plugin_cache(self):
-        root = Path("codex-context-optimizer")
+        root = Path("plugins/codex-context-optimizer")
         request = json.dumps({
             "jsonrpc": "2.0",
             "id": 1,
@@ -73,14 +73,14 @@ class PluginPackageTests(unittest.TestCase):
         plugin = marketplace["plugins"][0]
         self.assertEqual(marketplace["name"], "token-usage-local")
         self.assertEqual(plugin["name"], "codex-context-optimizer")
-        self.assertEqual(plugin["source"]["path"], "./codex-context-optimizer")
+        self.assertEqual(plugin["source"]["path"], "./plugins/codex-context-optimizer")
 
     def test_controlled_mcp_tools_require_approval(self):
         config = Path(".codex/config.toml").read_text(encoding="utf-8")
         self.assertIn('default_tools_approval_mode = "prompt"', config)
 
     def test_self_contained_runtime_suppresses_duplicate_after_restart(self):
-        root = Path("codex-context-optimizer")
+        root = Path("plugins/codex-context-optimizer")
         script = root / "scripts" / "mcp_server.py"
         request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "sample.txt"}}}) + "\n"
         with tempfile.TemporaryDirectory() as temporary:
@@ -92,7 +92,7 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("重复结果已省略", json.loads(second.stdout)["result"]["content"][0]["text"])
 
     def test_self_contained_runtime_redacts_common_credentials(self):
-        script = Path("codex-context-optimizer/scripts/mcp_server.py").resolve()
+        script = Path("plugins/codex-context-optimizer/scripts/mcp_server.py").resolve()
         request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "credentials.txt"}}}) + "\n"
         secrets = "AWS_SECRET_ACCESS_KEY=leaked-value\nAWS_SESSION_TOKEN=session-secret\nAuthorization: Bearer bearer-secret\nAuthorization: Token token-secret\nghp_abcdefghijklmnopqrstuvwxyz1234567890\ngithub_pat_abcdefghijklmnopqrstuvwxyz0123456789\npostgresql://admin:db-secret@example.test/app\nhttps://admin:https-secret@example.test/path\n"
         with tempfile.TemporaryDirectory() as temporary:
@@ -103,7 +103,7 @@ class PluginPackageTests(unittest.TestCase):
             self.assertNotIn(secret, visible)
 
     def test_self_contained_runtime_writes_a_receipt_for_every_call(self):
-        script = Path("codex-context-optimizer/scripts/mcp_server.py").resolve()
+        script = Path("plugins/codex-context-optimizer/scripts/mcp_server.py").resolve()
         request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "sample.txt"}}}) + "\n"
         with tempfile.TemporaryDirectory() as temporary:
             data = Path(temporary, "data")
@@ -117,14 +117,14 @@ class PluginPackageTests(unittest.TestCase):
             self.assertEqual(duplicate_count, 1)
 
     def test_self_contained_runtime_silently_accepts_initialized_notification(self):
-        script = Path("codex-context-optimizer/scripts/mcp_server.py").resolve()
+        script = Path("plugins/codex-context-optimizer/scripts/mcp_server.py").resolve()
         notification = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}) + "\n"
         with tempfile.TemporaryDirectory() as temporary:
             completed = subprocess.run([sys.executable, str(script)], input=notification, text=True, capture_output=True, cwd=temporary, check=True)
         self.assertEqual(completed.stdout, "")
 
     def test_self_contained_runtime_negotiates_the_client_protocol_version(self):
-        script = Path("codex-context-optimizer/scripts/mcp_server.py").resolve()
+        script = Path("plugins/codex-context-optimizer/scripts/mcp_server.py").resolve()
         request = json.dumps({
             "jsonrpc": "2.0",
             "id": 1,
@@ -137,7 +137,7 @@ class PluginPackageTests(unittest.TestCase):
         self.assertEqual(json.loads(completed.stdout)["result"]["protocolVersion"], "2025-11-25")
 
     def test_pre_compact_hook_reports_receipt_counts_without_raw_output(self):
-        script = Path("codex-context-optimizer/hooks/pre_compact.py").resolve()
+        script = Path("plugins/codex-context-optimizer/hooks/pre_compact.py").resolve()
         with tempfile.TemporaryDirectory() as temporary:
             data = Path(temporary, "data")
             data.mkdir()

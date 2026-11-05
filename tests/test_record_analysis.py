@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from datetime import datetime, timezone
 
-sys.path.insert(0, str(Path(__file__).parent / 'codex-context-optimizer/scripts'))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'plugins/codex-context-optimizer/scripts'))
 from record_analysis import inspect_records, classify, render_details, tool_breakdown
 from content_analysis import token_estimator
 from collections import defaultdict

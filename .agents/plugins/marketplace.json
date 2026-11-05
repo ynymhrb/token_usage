@@ -8,7 +8,7 @@
       "name": "codex-context-optimizer",
       "source": {
         "source": "local",
-        "path": "./codex-context-optimizer"
+        "path": "./plugins/codex-context-optimizer"
       },
       "policy": {
         "installation": "AVAILABLE",

@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 
-MODULE = Path(__file__).parent / ".claude" / "skills" / "usage-analyze" / "scripts" / "current_session.py"
+MODULE = Path(__file__).parent.parent / ".claude" / "skills" / "usage-analyze" / "scripts" / "current_session.py"
 
 
 def load_module():

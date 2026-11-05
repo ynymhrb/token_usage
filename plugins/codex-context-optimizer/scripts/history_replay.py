@@ -58,6 +58,22 @@ class State:
     blocked: bool = False
 
 
+INPUT_CATEGORIES = (
+    '基础指令', '开发者指令', 'Skill 说明', 'AGENTS 与工作区规则',
+    '工具定义', '工具参数与调用代码', '工具结果', '用户消息', '助手消息', '其他内容',
+)
+
+
+def normalize_input_categories(categories):
+    aliases = {'工具定义（原生补估）': '工具定义', 'Skill 正文（显式标记）': 'Skill 说明',
+               '请求顶层指令': '基础指令', '系统指令': '基础指令', '其他消息': '其他内容'}
+    result = Counter()
+    for name, value in categories.items():
+        name = aliases.get(name, name)
+        result[name if name in INPUT_CATEGORIES else '其他内容'] += value
+    return result
+
+
 def replay_history(paths, scope, estimate=None, native_query=None):
     estimate = estimate or token_estimator()[0]
     native_query = native_query or query_native_tools
@@ -246,7 +262,7 @@ def replay_history(paths, scope, estimate=None, native_query=None):
                     if key not in included:
                         stat['requests'] += 1
                         included.add(key)
-    return totals, categories, sessions, tool_stats
+    return totals, normalize_input_categories(categories), sessions, tool_stats
 
 
 def render_replay(paths, scope, titles=None, replayed=None, official_input=None):

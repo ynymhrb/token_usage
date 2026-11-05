@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'plugins/codex-context-optimizer/scripts'))
-from history_replay import replay_history, truncate_output, render_replay
+from history_replay import replay_history, truncate_output, render_replay, normalize_input_categories, INPUT_CATEGORIES
 
 ALL = ('all', '', None, None, None)
 
@@ -34,6 +34,15 @@ def history():
 
 
 class ReplayTests(unittest.TestCase):
+    def test_input_categories_use_stable_names_and_preserve_totals(self):
+        result = normalize_input_categories({'工具定义': 10, '工具定义（原生补估）': 20,
+            'Skill 正文（显式标记）': 3, 'Skill 说明': 5, '未认识的内容': 7})
+        self.assertEqual(result['工具定义'], 30)
+        self.assertEqual(result['Skill 说明'], 8)
+        self.assertEqual(result['其他内容'], 7)
+        self.assertEqual(sum(result.values()), 45)
+        self.assertTrue(set(result).issubset(set(INPUT_CATEGORIES)))
+
     def test_report_classifies_cumulative_input_without_per_result_ranking(self):
         result = self.run_rows(history())
         totals, counts, _, tools = result

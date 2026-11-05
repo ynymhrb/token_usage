@@ -110,6 +110,24 @@ def classify(name):
     return '其他或无法识别'
 
 
+TOOL_CATEGORIES = (
+    '文件读取与搜索', '命令执行与日志', '测试与构建日志', 'Git',
+    '网页与网络', '文件修改', '子代理与 MCP', '混合或无法识别',
+)
+
+_TOOL_CATEGORY_ALIASES = {
+    '文件读取': '文件读取与搜索',
+    '检索与网页': '网页与网络',
+    '网络请求': '网页与网络',
+    'Agent 与 MCP': '子代理与 MCP',
+    '混合命令输出': '混合或无法识别',
+    '多类工具混合返回': '混合或无法识别',
+    '动态调用或组合工具（未能细分）': '混合或无法识别',
+    '代码执行与组合工具': '混合或无法识别',
+    '其他或无法识别': '混合或无法识别',
+}
+
+
 def tool_breakdown(tools):
     """合并同义类别；来源依据独立于类别和统计数值。"""
     merged = {}
@@ -117,12 +135,13 @@ def tool_breakdown(tools):
         basis = '工具名称或命令参数'
         if name.endswith('（按调用代码推断）'):
             name, basis = name.removesuffix('（按调用代码推断）'), '调用代码推断'
-        elif name == '动态调用或组合工具（未能细分）':
-            name, basis = '代码执行与组合工具', '无法识别内层调用'
-        elif name == '多类工具混合返回':
-            basis = '调用代码包含多类工具'
-        if name == '文件读取':
-            name = '文件读取与搜索'
+        if name in {'混合命令输出', '多类工具混合返回'}:
+            basis = '包含多类操作，无法可靠拆分'
+        elif name in {'动态调用或组合工具（未能细分）', '代码执行与组合工具', '其他或无法识别'}:
+            basis = '无法识别具体类别'
+        name = _TOOL_CATEGORY_ALIASES.get(name, name)
+        if name not in TOOL_CATEGORIES:
+            name, basis = '混合或无法识别', '无法识别具体类别'
         entry = merged.setdefault(name, {'tokens': 0, 'calls': 0, 'largest_tokens': 0, 'sources': set()})
         entry['tokens'] += row.get('tokens', 0)
         entry['calls'] += row['calls']

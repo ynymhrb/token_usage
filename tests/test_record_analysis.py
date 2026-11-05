@@ -7,13 +7,23 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'plugins/codex-context-optimizer/scripts'))
-from record_analysis import inspect_records, classify, render_details, tool_breakdown
+from record_analysis import inspect_records, classify, render_details, tool_breakdown, TOOL_CATEGORIES
 from content_analysis import token_estimator
 from collections import defaultdict
 from token_analyzer_runtime import _context
 
 
 class RecordAnalysisTests(unittest.TestCase):
+    def test_tool_categories_are_fixed_and_aliases_do_not_change_totals(self):
+        values = {name: {'tokens': i + 1, 'calls': 1} for i, name in enumerate((
+            '混合命令输出', '多类工具混合返回', '动态调用或组合工具（未能细分）',
+            '其他或无法识别', '网络请求', '检索与网页', 'Agent 与 MCP', '文件读取',
+            '未来新增未知类别'))}
+        result = tool_breakdown(values)
+        self.assertTrue(set(result).issubset(set(TOOL_CATEGORIES)))
+        self.assertEqual(sum(row['tokens'] for row in result.values()), 45)
+        self.assertEqual(result['混合或无法识别']['tokens'], 19)
+        self.assertEqual(result['网页与网络']['tokens'], 11)
     def test_tool_tokens_reconcile_with_parent_after_duplicate_outputs(self):
         contents = defaultdict(list)
         records = [
@@ -55,7 +65,8 @@ class RecordAnalysisTests(unittest.TestCase):
         report = render_details({'时间': {}, '会话': {}}, tools, 0, 0, {})
         self.assertIn('| 类别 | 来源依据 |', report)
         self.assertIn('| Git | 调用代码推断 |', report)
-        self.assertIn('| 代码执行与组合工具 | 无法识别内层调用 |', report)
+        self.assertIn('| 混合或无法识别 |', report)
+        self.assertIn('无法识别具体类别', report)
         self.assertNotIn('（按调用代码推断）', report)
 
     def test_combined_tools_are_not_misreported_as_shell(self):

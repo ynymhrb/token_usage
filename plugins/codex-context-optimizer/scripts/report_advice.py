@@ -39,7 +39,7 @@ def render_advice(contents, tools, replayed=None):
     if not candidates:
         return ''
     basis = '按历史重放的累计输入估算排序' if cumulative else '按本次正文大小排序'
-    lines = ['## 优先优化项', '', basis + '；这是排查顺序，不是预计节省量。', '']
+    lines = ['## 优化项', '', basis + '；这是排查顺序，不是预计节省量。', '']
     for index, (name, size) in enumerate(sorted(candidates, key=lambda item: -item[1])[:3], 1):
         lines.append(f'{index}. **{name}：约 {size:,} Token。** {actions[name]}')
     return '\n'.join(lines) + '\n'

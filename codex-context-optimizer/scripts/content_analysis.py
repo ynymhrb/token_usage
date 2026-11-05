@@ -20,6 +20,15 @@ def text_of(value):
     return ''
 
 
+def output_text(value):
+    """工具多模态返回只统计文本；图片和音频编码不属于可见正文。"""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list) and all(isinstance(part, dict) and 'type' in part for part in value):
+        return '\n'.join(text_of(part) for part in value if part.get('type') in {'text', 'input_text', 'output_text'})
+    return json.dumps(value, ensure_ascii=False)
+
+
 def load_titles(root):
     result = {}
     named_ids = set()
@@ -132,7 +141,7 @@ def collect_content(record, counts):
     elif item_type.endswith('_call_output'):
         category = '工具结果'
         value = payload.get('output', '')
-        body = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        body = output_text(value)
     elif item_type in {'function_call', 'custom_tool_call'}:
         category = '工具参数与调用代码'
         value = payload.get('input', payload.get('arguments', ''))

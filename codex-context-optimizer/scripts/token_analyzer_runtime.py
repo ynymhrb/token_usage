@@ -16,6 +16,7 @@ from request_analysis import inspect_requests
 from request_comparison import render_comparison
 from native_tools import supplement_native_tools
 from report_advice import render_advice
+from history_replay import render_replay, replay_history
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -242,7 +243,12 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         native_note += f'\n{native_failed} 个会话的原生工具定义补估失败，未计入合计。\n'
     details = render_details(groups, tool_rows, missing_time, malformed, titles)
     tools_detail, distribution = details.split('## 消耗分布', 1)
+    replayed = replay_history(rollouts, scope)
+    replay = render_replay(rollouts, scope, titles, replayed=replayed)
+    comparison = render_comparison(exports, rollouts, scope, titles) if sample_count else ''
+    if comparison:
+        comparison = comparison.replace('## 重复携带与累计输入', '## 已保存请求样本对照', 1)
     diagnostic = (diagnostic + '\n\n' + render_content(contents) + native_note
-                  + '\n' + tools_detail + render_comparison(exports, rollouts, scope, titles)
-                  + '\n' + samples + '\n## 消耗分布' + distribution + '\n' + render_advice(contents, tool_rows))
+                  + '\n' + tools_detail + replay + comparison
+                  + '\n' + samples + '\n## 消耗分布' + distribution + '\n' + render_advice(contents, tool_rows, replayed=replayed))
     return {"summary": diagnostic}

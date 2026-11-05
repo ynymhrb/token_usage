@@ -7,6 +7,12 @@ from report_advice import render_advice
 
 
 class AdviceTests(unittest.TestCase):
+    def test_replay_cumulative_hotspot_overrides_once_only_size(self):
+        replayed = ({'requests': 2}, {'开发者指令': 100, '工具结果': 1000}, {},
+                    {'result': {'category':'Git', 'tokens':500, 'requests':2, 'occurrences':2}})
+        report = render_advice({'开发者指令':['很大的单次正文'*1000]}, {}, replayed=replayed)
+        self.assertIn('1. **工具结果', report)
+        self.assertIn('累计输入估算最高', report)
     def test_empty_data_has_no_invented_advice(self):
         self.assertEqual(render_advice({}, {}), '')
 

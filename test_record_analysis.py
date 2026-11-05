@@ -37,6 +37,18 @@ class RecordAnalysisTests(unittest.TestCase):
         self.assertEqual(merged['文件读取与搜索']['tokens'], 30)
         self.assertEqual(merged['文件读取与搜索']['largest_tokens'], 12)
 
+    def test_media_text_count_matches_parent(self):
+        contents = defaultdict(list)
+        rows = [{'type':'response_item','payload':{'type':'function_call_output','call_id':'c',
+            'output':[{'type':'input_text','text':'abc'}, {'type':'input_image','image_url':'data:image/png;base64,'+'A'*10000}]}}]
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'s.jsonl'
+            path.write_text('\n'.join(map(json.dumps,rows)),encoding='utf-8')
+            tools=inspect_records([path],('all','',None,None,None),contents)[2]
+        estimate,_=token_estimator()
+        self.assertEqual(contents['工具结果'], ['abc'])
+        self.assertEqual(sum(row['tokens'] for row in tools.values()), estimate('abc'))
+
     def test_tool_evidence_has_its_own_column(self):
         tools = {name: {'calls': 1, 'characters': 10, 'largest': 10} for name in (
             'Git（按调用代码推断）', '动态调用或组合工具（未能细分）', '多类工具混合返回')}

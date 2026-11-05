@@ -4,7 +4,7 @@ import json
 from collections import Counter, defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from content_analysis import infer_tool, collect_content, token_estimator
+from content_analysis import infer_tool, collect_content, token_estimator, output_text
 from report_charts import render_charts
 
 
@@ -82,7 +82,7 @@ def inspect_records(paths, scope, contents=None):
                 call = names.get(p.get('call_id'), {})
                 category = infer_tool(call, classify)
                 body = p.get('output', '')
-                body = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)
+                body = output_text(body)
                 chars = len(body)
                 tokens = estimate(body)
                 tools[category]['calls'] += 1

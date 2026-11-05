@@ -21,6 +21,49 @@ def chart_label(value):
     return str(value).replace('&', '＆').replace('"', '＂').replace('`', '｀').replace('<', '＜').replace('>', '＞').replace('\\', '／').replace('\n', ' ').replace('\r', ' ')
 
 
+
+def render_stacked(values):
+    """用垂直堆积色块表示占比，微小类别合并。"""
+    rows = [(str(name), value) for name, value in values if value > 0]
+    total = sum(value for _, value in rows)
+    if not total:
+        return ['没有可绘制的分类数据。', '']
+    rows.sort(key=lambda row: -row[1])
+    major = [(name, value) for name, value in rows if value / total >= 0.05]
+    minor = sum(value for _, value in rows if value / total < 0.05)
+    if minor:
+        major.append(('其他（各项不足 5%）', minor))
+    if len(major) > 10:
+        major = major[:9] + [('其他', sum(value for _, value in major[9:]))]
+    raw = [value * 20 / total for _, value in major]
+    widths = [int(value) for value in raw]
+    for index in sorted(range(len(raw)), key=lambda i: raw[i] - widths[i], reverse=True)[:20 - sum(widths)]:
+        widths[index] += 1
+    # 最小一格保留每个图中类别，其他格按最大余数分配。
+    for index, width in enumerate(widths):
+        if width == 0:
+            donor = max(range(len(widths)), key=lambda i: widths[i])
+            widths[donor] -= 1
+            widths[index] = 1
+    colors = ['#2563eb', '#047857', '#a16207', '#7c3aed', '#dc2626', '#0e7490', '#be185d', '#4d7c0f', '#c2410c', '#475569']
+    lines = [*chart_config(280), '  block:', '    padding: 0', '---', 'block-beta', '  columns 1']
+    for index, ((name, value), width) in enumerate(zip(major, widths)):
+        label = chart_label(f'{name} {value / total:.1%} · {value:,} Token')
+        for unit in range(width):
+            text = label if unit == (width - 1) // 2 else ' '
+            lines.append(f'  s{index}_{unit}["{text}"]')
+    for index, width in enumerate(widths):
+        for unit in range(width):
+            lines.append(f'  style s{index}_{unit} fill:{colors[index]},stroke:{colors[index]},color:#fff')
+    lines.extend(['```', ''])
+    if minor:
+        lines.extend(['', '不足 5% 的分类：'])
+        for name, value in rows:
+            if value / total < 0.05:
+                lines.append(f'- {name}：{value:,} Token（{value / total:.1%}）')
+    lines.extend(['', '色块高度按 5% 为单位近似，最小类别至少占一格；图内文字为准确占比和估算值。', ''])
+    return lines
+
 def render_charts(groups, session_name):
     lines = ['', '## 消耗分布', '', '口径：累计输入 Token（包含缓存输入）。', '', '### 按小时', '']
     hours = defaultdict(int)

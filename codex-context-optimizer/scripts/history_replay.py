@@ -9,6 +9,7 @@ from datetime import datetime
 from content_analysis import collect_content, infer_tool, token_estimator, output_text
 from native_tools import query_native_tools
 from record_analysis import classify
+from report_charts import render_stacked
 
 
 def in_scope(row, scope):
@@ -239,7 +240,7 @@ def replay_history(paths, scope, estimate=None, native_query=None):
                 for e, call in outputs:
                     key = e['key']
                     stat = tool_stats.setdefault(key, {'session': session, 'call_id': e['item'].get('call_id'),
-                        'category': infer_tool(call, classify).removesuffix('（按调用代码推断）'),
+                        'category': infer_tool(call, classify),
                         'tokens': e['counts'].get('工具结果', 0), 'requests': 0, 'occurrences': 0})
                     stat['occurrences'] += 1
                     if key not in included:
@@ -248,33 +249,25 @@ def replay_history(paths, scope, estimate=None, native_query=None):
     return totals, categories, sessions, tool_stats
 
 
-def render_replay(paths, scope, titles=None, replayed=None):
+def render_replay(paths, scope, titles=None, replayed=None, official_input=None):
     totals, categories, sessions, tools = replayed if replayed is not None else replay_history(paths, scope)
+    official = totals['actual'] if official_input is None else official_input
     if not totals['requests']:
-        return '历史重复携带量：当前日志没有足够的调用边界或有效历史检查点，暂不能还原。\n'
-    lines = ['## 历史重复携带与累计输入', '',
-             f"按事件顺序重建 {totals['requests']:,} 次调用的可见输入；重复次数与累计量均为历史重放估算。", '',
-             '| 累计正文估算 Token | 同批调用实际输入 Token | 估算减实际 |', '|---:|---:|---:|',
-             f"| {totals['estimated']:,} | {totals['actual']:,} | {totals['estimated'] - totals['actual']:+,} |", '',
-             '| 输入类别 | 累计估算 Token | 占累计正文 |', '|---|---:|---:|']
-    for name, value in categories.most_common():
-        if value:
-            share = f"{value / totals['estimated']:.1%}" if totals['estimated'] else '—'
-            lines.append(f'| {name} | {value:,} | {share} |')
-    lines.append(f"| 合计 | {totals['estimated']:,} | {'100.0%' if totals['estimated'] else '—'} |")
-    names, duplicates = {}, Counter()
-    for i, session in enumerate(sessions, 1):
-        name = str((titles or {}).get(session, f'未命名会话 {i}'))
-        duplicates[name] += 1
-        names[session] = name if duplicates[name] == 1 else f'{name}（同名 {duplicates[name]}）'
-    if tools:
-        lines.extend(['', '### 工具结果重复携带排行', '', '次数仅统计所选范围内的调用，重复次数不含首次携带；按累计估算展示前 10 条，不同正文版本分别统计。', '',
-                      '| 会话 / 工具结果 | 单次估算 Token | 携带次数 | 重复次数 | 累计估算 Token |', '|---|---:|---:|---:|---:|'])
-        for i, row in enumerate(sorted(tools.values(), key=lambda r: -r['tokens'] * r['occurrences'])[:10], 1):
-            name = ' '.join(str(names[row['session']]).split()).replace('|', '｜')[:60]
-            lines.append(f"| {name} / {row['category']} {i} | {row['tokens']:,} | {row['requests']} | {max(0, row['requests'] - 1)} | {row['tokens'] * row['occurrences']:,} |")
-        lines.extend(['', f"全部工具结果累计估算：{sum(row['tokens'] * row['occurrences'] for row in tools.values()):,} Token。"])
-    lines.extend(['', '按已记录的压缩历史和文本截断规则重放；未记录的请求调整、媒体和协议开销可能产生差额。'])
+        return ('## 输入内容分类\n\n无法重建输入分类；官方记录的输入全部列为未归因。\n\n'
+                '| 输入类别 | 累计 Token |\n|---|---:|\n'
+                f'| 未归因输入 | {official:,} |\n| 合计（官方记录） | {official:,} |\n')
+    residual = official - totals['estimated']
+    values = [(name, value) for name, value in categories.most_common() if value > 0]
+    if residual > 0:
+        values.append(('未归因与估算差额', residual))
+    lines = ['## 输入内容分类', '',
+             f"根据日志重建 {totals['requests']:,} 次调用；分类为估算，官方累计输入 {official:,} Token。", '']
+    if residual < 0:
+        lines.extend([f'分类估算合计超过官方记录 {-residual:,} Token，图中百分比以分类估算合计为基数。', ''])
+    else:
+        lines.extend(['图中百分比以官方累计输入为基数；差额包含未归因内容与估算误差。', ''])
+    lines.extend(render_stacked(values))
+    lines.extend(['分类基于历史重放，不是官方精确分类。', ''])
     if totals['skipped_requests']:
-        lines.append(f"另有 {totals['skipped_requests']} 次调用缺少可重建的历史或输出边界，未纳入以上对照。")
+        lines.append(f"另有 {totals['skipped_requests']} 次调用缺少可重建的历史或输出边界，其输入包含在差额中。")
     return '\n'.join(lines) + '\n'

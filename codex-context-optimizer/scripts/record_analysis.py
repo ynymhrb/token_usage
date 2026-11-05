@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from content_analysis import infer_tool, collect_content, token_estimator, output_text
-from report_charts import render_charts
+from report_charts import render_charts, render_stacked
 
 
 def inspect_records(paths, scope, contents=None):
@@ -131,7 +131,7 @@ def tool_breakdown(tools):
     return merged
 
 
-def render_details(groups, tools, missing_time, malformed, titles=None):
+def render_details(groups, tools, missing_time, malformed, titles=None, cumulative=False):
     titles = titles or {}
     unknown = {}
     def session_name(session):
@@ -144,14 +144,21 @@ def render_details(groups, tools, missing_time, malformed, titles=None):
     lines = ['### 输入中的工具结果分类', '', '对应上表“工具结果”一项，使用相同的 Token 估算口径；每条返回计一次。', '', '| 类别 | 来源依据 | 返回次数 | 估算 Token | 占工具结果 | 最大单次 Token |', '|---|---|---:|---:|---:|---:|']
     merged = tool_breakdown(tools)
     total_tokens = sum(row['tokens'] for row in merged.values())
-    for name, row in sorted(merged.items(), key=lambda x: -x[1]['tokens']):
-        share = f"{row['tokens'] / total_tokens:.1%}" if total_tokens else '—'
-        basis = '、'.join(sorted(row['sources']))
-        lines.append(f"| {name} | {basis} | {row['calls']} | {row['tokens']:,} | {share} | {row['largest_tokens']:,} |")
-    if merged:
-        lines.append(f"| 合计 | | {sum(row['calls'] for row in merged.values())} | {total_tokens:,} | {'100.0%' if total_tokens else '—'} | |")
-    if not tools:
-        lines.append('未找到可统计的工具返回记录。')
+    if cumulative:
+        lines = ['### 输入中的工具结果分类', '', '按历史重放估算累计输入；同一结果每次携带均计入。', '']
+        lines.extend(render_stacked([(name, row['tokens']) for name, row in merged.items()]))
+        if merged:
+            lines.append('来源依据：' + '；'.join(name + '：' + '、'.join(sorted(row['sources'])) for name, row in sorted(merged.items(), key=lambda item: -item[1]['tokens'])) + '。')
+            lines.append('')
+    else:
+        for name, row in sorted(merged.items(), key=lambda x: -x[1]['tokens']):
+            share = f"{row['tokens'] / total_tokens:.1%}" if total_tokens else '—'
+            basis = '、'.join(sorted(row['sources']))
+            lines.append(f"| {name} | {basis} | {row['calls']} | {row['tokens']:,} | {share} | {row['largest_tokens']:,} |")
+        if merged:
+            lines.append(f"| 合计 | | {sum(row['calls'] for row in merged.values())} | {total_tokens:,} | {'100.0%' if total_tokens else '—'} | |")
+        if not tools:
+            lines.append('未找到可统计的工具返回记录。')
     lines.extend(render_charts(groups, session_name))
     if missing_time or malformed:
         issues = []

@@ -6,10 +6,19 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from collections import Counter
 sys.path.insert(0, str(Path(__file__).parent / 'codex-context-optimizer/scripts'))
-from report_charts import render_charts
+from report_charts import render_charts, render_stacked
 
 
 class ChartTests(unittest.TestCase):
+    def test_stacked_percent_chart_totals_and_small_groups(self):
+        report = '\n'.join(render_stacked([('工具', 60), ('指令', 30), ('消息', 9), ('其他内容', 1)]))
+        self.assertIn('block-beta', report)
+        self.assertIn('工具 60.0% · 60 Token', report)
+        self.assertIn('其他（各项不足 5%） 1.0% · 1 Token', report)
+        self.assertEqual(len(re.findall(r'^  s\d+_\d+\[', report, re.MULTILINE)), 20)
+        self.assertIn('columns 1', report)
+        self.assertIn('没有可绘制', '\n'.join(render_stacked([])))
+
     def test_compact_chart_sizes_and_bar_cap(self):
         groups = {'时间': {'2026-11-05 01:00': Counter(input_tokens=5000000)},
                   '会话': {'a': Counter(input_tokens=5000000)}}

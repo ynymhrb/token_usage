@@ -75,9 +75,7 @@ def compare_requests(exports, rollouts, scope, estimate=None):
 
 def render_comparison(exports, rollouts, scope, titles=None):
     totals, sessions, tools = compare_requests(exports, rollouts, scope)
-    titles = titles or {}
-    names = {session: next((title for key, title in titles.items() if key == session or key in session), f'未命名会话 {index}') for index, session in enumerate(sessions, 1)}
-    lines = ['## 重复携带与累计输入', '', '同一段内容可能随多次请求重复输入；这里统计重复次数，并与这些请求记录的实际输入 Token 对照。', '']
+    lines = ['## 重复携带与累计输入', '', '按已保存请求累计正文估算，并与同批请求记录的实际输入 Token 对照。', '']
     if not totals['requests']:
         return '重复携带次数与累计分类用量：缺少逐次请求记录，暂不能统计。\n'
     lines.extend([f"已保存请求 {totals['requests']:,} 次，正文累计估算 {totals['estimated']:,} Token。各会话分别累计后汇总。", ''])
@@ -89,14 +87,4 @@ def render_comparison(exports, rollouts, scope, titles=None):
                       '|---:|---:|---:|---:|', f'| {estimated:,} | {actual:,} | {estimated - actual:+,} | {ratio} |', ''])
     else:
         lines.extend(['请求样本未关联到实际用量，暂不计算差值。', ''])
-    if tools:
-        lines.extend(['### 工具结果重复携带', '', '按累计估算量展示前 10 项；重复次数不含首次出现，仅统计已保存请求。', '',
-                      '| 会话 / 工具结果 | 单次估算 Token | 出现请求数 | 重复出现次数 | 累计估算 Token |', '|---|---:|---:|---:|---:|'])
-        ordered = sorted(tools.values(), key=lambda row: -row['tokens'] * row['occurrences'])
-        for index, row in enumerate(ordered[:10], 1):
-            name = ' '.join(str(names[row['session']]).split()).replace('|', '｜')[:60]
-            lines.append(f"| {name} / 结果 {index} | {row['tokens']:,} | {row['requests']:,} | {row['occurrences'] - 1:,} | {row['tokens'] * row['occurrences']:,} |")
-        lines.extend(['', f"已关联工具结果累计估算：{sum(row['tokens'] * row['occurrences'] for row in ordered):,} Token。", ''])
-    if totals['unidentified_tools']:
-        lines.append(f"另有 {totals['unidentified_tools']} 条工具结果缺少调用标识，计入正文总量，但无法关联重复次数。")
     return '\n'.join(lines)

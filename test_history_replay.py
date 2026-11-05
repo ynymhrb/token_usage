@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / 'codex-context-optimizer/scripts'))
-from history_replay import replay_history, truncate_output
+from history_replay import replay_history, truncate_output, render_replay
 
 ALL = ('all', '', None, None, None)
 
@@ -34,6 +34,22 @@ def history():
 
 
 class ReplayTests(unittest.TestCase):
+    def test_report_classifies_cumulative_input_without_per_result_ranking(self):
+        result = self.run_rows(history())
+        totals, counts, _, tools = result
+        self.assertEqual(counts['工具结果'], 8)
+        self.assertEqual(sum(row['tokens'] * row['occurrences'] for row in tools.values()), 8)
+        report = render_replay([], ALL, replayed=result)
+        self.assertIn('## 输入内容分类', report)
+        self.assertIn('工具结果：8 Token', report)
+        self.assertIn('官方累计输入 300 Token', report)
+        self.assertIn('未归因与估算差额', report)
+        overestimated = render_replay([], ALL, replayed=result, official_input=1)
+        self.assertIn('分类估算合计超过官方记录', overestimated)
+        self.assertIn('官方累计输入 1 Token', overestimated)
+        self.assertNotIn('工具结果重复携带排行', report)
+        self.assertNotIn('原始内容分类', report)
+
     def test_multiple_sessions_do_not_share_tool_counts(self):
         with tempfile.TemporaryDirectory() as directory:
             paths = []

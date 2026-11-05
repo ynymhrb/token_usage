@@ -13,8 +13,6 @@ from zoneinfo import ZoneInfo
 from record_analysis import inspect_records, render_details
 from content_analysis import load_titles, render_content
 from request_analysis import inspect_requests
-from request_comparison import render_comparison
-from native_tools import supplement_native_tools
 from report_advice import render_advice
 from history_replay import render_replay, replay_history
 
@@ -197,7 +195,7 @@ def _diagnostic_markdown(
         f"- 分析范围：{scope_description}；{session_count} 个有用量记录的会话。",
         f"- 累计输入：{input_tokens:,} Token；其中缓存输入 {cached_tokens:,}（{cache_percent}），非缓存输入 {uncached_tokens:,}。",
         f"- 输出总计：{output_tokens:,} Token。",
-        "- 累计输入包含历史内容在多次请求中的重复携带；下方分类统计正文大小。",
+        "- 下方输入内容分类按多次请求中携带的内容累计估算。",
     ]
     return "\n".join(lines)
 
@@ -215,7 +213,6 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         exports = _select(exports, scope)
     contents = defaultdict(list)
     totals, groups, tool_rows, observed, readable, missing_time, malformed = inspect_records(rollouts, scope, contents)
-    native_added, native_failed = supplement_native_tools(rollouts, scope, contents)
     input_tokens = totals['input_tokens']
     output_tokens = totals['output_tokens']
     cached_tokens = totals['cached_input_tokens']
@@ -236,19 +233,20 @@ def analyze(scope_expression: str | None, focus: str | None, sessions_root: Path
         categories=Counter(),
         session_count=len(groups['会话']),
     )
-    samples = render_content(sample_contents, request_count=sample_count) + '\n' if sample_count and sample_contents else ''
     titles = load_titles(sessions_root.parent)
-    native_note = f'\n{native_added} 个会话的工具定义使用当前原生默认配置补估，已计入合计；历史版本及配置可能不同。\n' if native_added else ''
-    if native_failed:
-        native_note += f'\n{native_failed} 个会话的原生工具定义补估失败，未计入合计。\n'
-    details = render_details(groups, tool_rows, missing_time, malformed, titles)
-    tools_detail, distribution = details.split('## 消耗分布', 1)
     replayed = replay_history(rollouts, scope)
-    replay = render_replay(rollouts, scope, titles, replayed=replayed)
-    comparison = render_comparison(exports, rollouts, scope, titles) if sample_count else ''
-    if comparison:
-        comparison = comparison.replace('## 重复携带与累计输入', '## 已保存请求样本对照', 1)
-    diagnostic = (diagnostic + '\n\n' + render_content(contents) + native_note
-                  + '\n' + tools_detail + replay + comparison
-                  + '\n' + samples + '\n## 消耗分布' + distribution + '\n' + render_advice(contents, tool_rows, replayed=replayed))
+    replay = render_replay(rollouts, scope, titles, replayed=replayed, official_input=input_tokens)
+    cumulative_tools = {}
+    for row in replayed[3].values():
+        entry = cumulative_tools.setdefault(row['category'], {'tokens': 0, 'calls': 0, 'largest_tokens': 0})
+        entry['tokens'] += row['tokens'] * row['occurrences']
+        entry['calls'] += row['occurrences']
+        entry['largest_tokens'] = max(entry['largest_tokens'], row['tokens'])
+    details = render_details(groups, cumulative_tools, missing_time, malformed, titles, cumulative=True)
+    tools_detail, distribution = details.split('## 消耗分布', 1)
+    if not replayed[0]['requests']:
+        tools_detail = ''
+    advice = render_advice(contents, tool_rows, replayed=replayed) if replayed[0]['requests'] else ''
+    diagnostic = (diagnostic + '\n\n' + replay + '\n' + tools_detail
+                  + '\n## 消耗分布' + distribution + '\n' + advice)
     return {"summary": diagnostic}

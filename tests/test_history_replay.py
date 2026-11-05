@@ -34,6 +34,36 @@ def history():
 
 
 class ReplayTests(unittest.TestCase):
+    def test_recorded_base_instructions_replace_session_metadata_base(self):
+        rows = history()
+        rows[0]['payload']['base_instructions'] = {'text': 'BASE'}
+        tagged = message('developer', 'BASE')
+        tagged['payload']['internal_chat_message_metadata_passthrough'] = {
+            'content_item_kinds': ['model.base_instructions']}
+        rows.insert(1, tagged)
+        totals, counts, _, _ = self.run_rows(rows)
+        self.assertEqual(totals['requests'], 3)
+        self.assertEqual(counts['基础指令'], 12)
+        self.assertEqual(counts.get('开发者指令', 0), 0)
+
+    def test_untagged_identical_developer_message_is_not_discarded(self):
+        rows = history()
+        rows[0]['payload']['base_instructions'] = {'text': 'BASE'}
+        rows.insert(1, message('developer', 'BASE'))
+        _, counts, _, _ = self.run_rows(rows)
+        self.assertEqual(counts['基础指令'], 12)
+        self.assertEqual(counts['开发者指令'], 12)
+
+    def test_recorded_base_survives_compaction_without_reintroducing_metadata_base(self):
+        rows = history()
+        rows[0]['payload']['base_instructions'] = {'text': 'BASE'}
+        tagged = message('developer', 'BASE')['payload']
+        tagged['internal_chat_message_metadata_passthrough'] = {'content_item_kinds': ['model.base_instructions']}
+        rows.insert(1, {'type': 'compacted', 'payload': {'replacement_history': [tagged]}})
+        _, counts, _, _ = self.run_rows(rows)
+        self.assertEqual(counts['基础指令'], 12)
+        self.assertEqual(counts.get('开发者指令', 0), 0)
+
     def test_input_categories_use_stable_names_and_preserve_totals(self):
         result = normalize_input_categories({'工具定义': 10, '工具定义（原生补估）': 20,
             'Skill 正文（显式标记）': 3, 'Skill 说明': 5, '未认识的内容': 7})

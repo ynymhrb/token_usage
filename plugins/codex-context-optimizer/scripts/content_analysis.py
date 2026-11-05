@@ -135,6 +135,10 @@ def collect_content(record, counts):
     if item_type == 'message':
         body = text_of(payload.get('content', ''))
         category = {'user': '用户消息', 'assistant': '助手消息', 'developer': '开发者指令', 'system': '系统指令'}.get(payload.get('role'), '其他消息')
+        metadata = payload.get('internal_chat_message_metadata_passthrough')
+        if (payload.get('role') == 'developer' and isinstance(metadata, dict)
+                and metadata.get('content_item_kinds') == ['model.base_instructions']):
+            category = '基础指令'
         if payload.get('role') in {'developer', 'system'} or (payload.get('role') == 'user' and '# AGENTS.md instructions' in body):
             split_instructions(body, category, counts, allow_agents=payload.get('role') in {'developer', 'system'})
             return

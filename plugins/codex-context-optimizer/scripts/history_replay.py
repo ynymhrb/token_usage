@@ -112,7 +112,12 @@ def replay_history(paths, scope, estimate=None, native_query=None):
         return {'item': item, 'counts': cached_items[digest], 'key': (session, item.get('call_id'), body_digest)}
 
     def snapshot(state, session):
-        counts = state.base.copy()
+        def is_recorded_base(entry):
+            item = entry['item']
+            meta = item.get('internal_chat_message_metadata_passthrough')
+            return (item.get('type') == 'message' and item.get('role') == 'developer'
+                    and isinstance(meta, dict) and meta.get('content_item_kinds') == ['model.base_instructions'])
+        counts = Counter() if any(is_recorded_base(e) for e in state.history) else state.base.copy()
         calls = {e['item'].get('call_id'): e['item'] for e in state.history
                  if e['item'].get('type') in {'function_call', 'custom_tool_call'}}
         outputs = []

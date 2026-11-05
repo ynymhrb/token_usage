@@ -26,6 +26,7 @@ SWITCHES = {
     "--no-subagents",
     "--statusline-capture",
     "--current-five-hour",
+    "--current-session",
     "--list-five-hour-windows",
     "--version",
 }
@@ -33,6 +34,7 @@ PERIOD_SELECTORS = {
     "--period",
     "--last-hours",
     "--current-five-hour",
+    "--current-session",
     "--five-hour-at",
     "--list-five-hour-windows",
     "--statusline-capture",
@@ -67,7 +69,7 @@ def _map_time_text(text: str) -> tuple[list[str], str]:
         value = hour_matches[0]
         return ["--last-hours", value], f"time description -> --last-hours {value}"
     if current:
-        return ["--current-five-hour"], "time description -> --current-five-hour"
+        return ["--current-session"], "time description -> --current-session"
     raise RouteError("unsupported text; provide a supported time description or explicit profiler flags")
 
 
@@ -122,7 +124,7 @@ def route(arguments: Sequence[str]) -> dict[str, object]:
         profiler_args.extend(mapped)
         has_selector = True
     elif not has_selector and not has_session:
-        profiler_args.append("--current-five-hour")
+        profiler_args.append("--current-session")
 
     return {
         "mode": mode,

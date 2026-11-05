@@ -1,8 +1,23 @@
 {
   "mcpServers": {
     "context_optimizer": {
-      "command": "python",
-      "args": ["${PLUGIN_ROOT}/scripts/mcp_server.py"]
+      "command": "C:\\Users\\19632\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+      "args": [
+        "scripts/mcp_server.py"
+      ],
+      "cwd": ".",
+      "enabled": false,
+      "env_vars": ["CODEX_HOME", "PATH"],
+      "default_tools_approval_mode": "prompt"
+    },
+    "token_analyzer": {
+      "command": "C:\\Users\\19632\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+      "args": [
+        "scripts/token_analyzer_server.py"
+      ],
+      "cwd": ".",
+      "enabled": true,
+      "default_tools_approval_mode": "approve"
     }
   }
 }

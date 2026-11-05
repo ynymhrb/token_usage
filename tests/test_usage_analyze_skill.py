@@ -11,7 +11,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SKILL = ROOT / ".claude" / "skills" / "usage-analyze"
 SKILL_MD = SKILL / "SKILL.md"
-OPENAI_YAML = SKILL / "agents" / "openai.yaml"
 BUNDLED_PROFILER = SKILL / "scripts" / "claude_session_token_profiler.py"
 BUNDLED_WRAPPER = SKILL / "scripts" / "usage-analyze.ps1"
 ANALYSIS_CONTRACT = SKILL / "references" / "analysis-contract.md"
@@ -27,7 +26,6 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
     def test_required_files_exist(self):
         for path in (
             SKILL_MD,
-            OPENAI_YAML,
             BUNDLED_PROFILER,
             BUNDLED_WRAPPER,
             ANALYSIS_CONTRACT,
@@ -59,7 +57,7 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
             "temporary",
             "--llm-package",
             "read only that package",
-            "--current-five-hour",
+            "--current-session",
             "natural language",
             "display_mapping",
             "Never read raw transcripts",
@@ -85,13 +83,13 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
         assert spec.loader is not None
         spec.loader.exec_module(module)
 
-        self.assertEqual(module.route(["--llm"])["profiler_args"], ["--current-five-hour"])
+        self.assertEqual(module.route(["--llm"])["profiler_args"], ["--current-session"])
         self.assertEqual(
             module.route(["--llm", "--lang", "en"])["profiler_args"],
-            ["--lang", "en", "--current-five-hour"],
+            ["--lang", "en", "--current-session"],
         )
         raw = module.route(["--raw", "最近一次"])
-        self.assertEqual(raw["profiler_args"], ["--current-five-hour"])
+        self.assertEqual(raw["profiler_args"], ["--current-session"])
         self.assertFalse(raw["display_mapping"])
         analyzed = module.route(["最近6小时"])
         self.assertEqual(analyzed["profiler_args"], ["--last-hours", "6"])
@@ -163,11 +161,8 @@ class UsageAnalyzeSkillTests(unittest.TestCase):
             self.assertIn(term, text)
         self.assertIn("not observable", text)
 
-    def test_openai_metadata_is_concise_and_explicit(self):
-        text = self.read(OPENAI_YAML)
-        self.assertIn('display_name: "usageAnalyze"', text)
-        self.assertIn('short_description: "Analyze Claude token usage safely"', text)
-        self.assertIn("$usage-analyze", text)
+    def test_claude_skill_is_not_discoverable_as_a_codex_skill(self):
+        self.assertFalse((SKILL / "agents" / "openai.yaml").exists())
 
 
 if __name__ == "__main__":

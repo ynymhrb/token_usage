@@ -20,8 +20,22 @@ catch {
 
 $pythonPath = if ($pythonCommand.Source) { $pythonCommand.Source } else { $pythonCommand.Path }
 $arguments = @($profilerPath)
+$currentSessionFlag = "--current-session"
 if ($null -eq $ProfilerArgs -or $ProfilerArgs.Count -eq 0) {
-    $arguments += "--current-five-hour"
+    $ProfilerArgs = @($currentSessionFlag)
+}
+if ($ProfilerArgs -contains $currentSessionFlag) {
+    if ($ProfilerArgs.Count -ne 1) {
+        Write-Error "--current-session cannot be combined with other profiler arguments."
+        exit 2
+    }
+    $resolverPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "current_session.py")).Path
+    $sessionId = (& $pythonPath $resolverPath "--cwd" (Get-Location).Path).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sessionId)) {
+        if ($LASTEXITCODE -eq 0) { exit 2 }
+        exit $LASTEXITCODE
+    }
+    $arguments += $sessionId
 }
 else {
     $arguments += $ProfilerArgs

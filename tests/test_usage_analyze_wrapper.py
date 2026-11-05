@@ -29,9 +29,12 @@ class UsageAnalyzeWrapperTests(unittest.TestCase):
                 import sys
                 from pathlib import Path
 
-                Path(os.environ["USAGE_ANALYZE_TEST_RECORD"]).write_text(
-                    json.dumps(sys.argv[1:]), encoding="utf-8"
-                )
+                record = Path(os.environ["USAGE_ANALYZE_TEST_RECORD"])
+                calls = json.loads(record.read_text(encoding="utf-8")) if record.exists() else []
+                calls.append(sys.argv[1:])
+                record.write_text(json.dumps(calls), encoding="utf-8")
+                if sys.argv[1].endswith("current_session.py"):
+                    print("44444444-4444-4444-4444-444444444444")
                 raise SystemExit(int(os.environ.get("USAGE_ANALYZE_TEST_PYTHON_EXIT", "0")))
                 """
             ),
@@ -57,7 +60,7 @@ class UsageAnalyzeWrapperTests(unittest.TestCase):
     def test_wrapper_exists(self):
         self.assertTrue(WRAPPER.is_file(), "scripts/usage-analyze.ps1 must exist")
 
-    def test_defaults_to_current_five_hour_with_absolute_profiler_from_unrelated_cwd(self):
+    def test_defaults_to_current_session_with_absolute_profiler_from_unrelated_cwd(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             commands = temp / "commands"
@@ -73,7 +76,9 @@ class UsageAnalyzeWrapperTests(unittest.TestCase):
             result = self.run_wrapper([], temp, env)
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(record.read_text(encoding="utf-8")), [str(PROFILER.resolve()), "--current-five-hour"])
+            calls = json.loads(record.read_text(encoding="utf-8"))
+            self.assertTrue(calls[0][0].endswith("current_session.py"))
+            self.assertEqual(calls[1], [str(PROFILER.resolve()), "44444444-4444-4444-4444-444444444444"])
             self.assertFalse(claude_marker.exists())
 
     def test_forwards_profiler_arguments_exactly_and_propagates_exit_code(self):
@@ -93,7 +98,7 @@ class UsageAnalyzeWrapperTests(unittest.TestCase):
             result = self.run_wrapper(arguments, temp, env)
 
             self.assertEqual(result.returncode, 17, result.stderr)
-            self.assertEqual(json.loads(record.read_text(encoding="utf-8")), [str(PROFILER.resolve()), *arguments])
+            self.assertEqual(json.loads(record.read_text(encoding="utf-8")), [[str(PROFILER.resolve()), *arguments]])
             self.assertFalse(claude_marker.exists())
 
     def test_wrapper_reports_profiler_version(self):
